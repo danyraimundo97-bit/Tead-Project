@@ -1,0 +1,17 @@
+{
+    "sqltools.connections": [
+        {
+            "trinoOptions": {
+                "ssl": {
+                    "rejectUnauthorized": true
+                }
+            },
+            "previewLimit": 50,
+            "driver": "Trino Driver",
+            "name": "Trino TEAD",
+            "server": "http://localhost:8080",
+            "catalog": "iceberg",
+            "user": "wathever"
+        }
+    ]
+}
