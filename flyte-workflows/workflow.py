@@ -1,9 +1,25 @@
-from flytekit import task, workflow, LaunchPlan
-import os
+from flytekit import task, workflow, LaunchPlan, ImageSpec
 
-@task
+from flyte_task_env import TASK_ENV
+from loki_logging import get_logger
+
+logger = get_logger(__name__)
+
+workflow_tools_image = ImageSpec(
+    name="jdpt_lakehouse_workflow_tools",
+    packages=["python-logging-loki"],
+    registry="localhost:30000",
+)
+
+
+@task(container_image=workflow_tools_image, environment=TASK_ENV)
 def check_mlflow_config(mlflow_url: str, minio_access: str, minio_secret: str) -> str:
-    return f"URL: {mlflow_url} | Access: {minio_access} | Secret: {minio_secret}"
+    try:
+        logger.info("check_mlflow_config: validating inputs (mlflow_url=%s)", mlflow_url)
+        return f"URL: {mlflow_url} | Access: {minio_access} | Secret: {minio_secret}"
+    except Exception as e:
+        logger.error(f"❌ TASK FAILED: {str(e)}")
+        raise Exception(f"Captured Task Error: {str(e)}")
 
 @workflow
 def my_workflow(mlflow_url: str, minio_access: str, minio_secret: str) -> str:

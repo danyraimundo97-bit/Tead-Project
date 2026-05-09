@@ -1,6 +1,15 @@
+import logging
 import pandas as pd
 import numpy as np
 from flytekit import task, workflow
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+    logger.addHandler(_h)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 # Configuração mágica para o Pandas comunicar diretamente com o MinIO local
 MINIO_OPTIONS = {
@@ -11,7 +20,7 @@ MINIO_OPTIONS = {
 
 @task
 def gerar_camada_bronze() -> str:
-    print("=== FASE 1: LEITURA DOS DADOS RAW DO MINIO ===")
+    logger.info("Fase 1: leitura dos dados raw do MinIO")
     
     # Em vez de ler do disco (C:\...), lemos diretamente do Data Lake (s3://...)
     # Certifique-se que o nome dos ficheiros na pasta Dados_Raw corresponde a estes!
@@ -19,8 +28,12 @@ def gerar_camada_bronze() -> str:
     df_cdr = pd.read_csv('s3://warehouse/Dados_Raw/CDR-Call-Details.csv', sep=';', storage_options=MINIO_OPTIONS)
     df_call = pd.read_csv('s3://warehouse/Dados_Raw/Call Tests Measurements for MOS prediction.csv', sep=';', storage_options=MINIO_OPTIONS)
     df_towers = pd.read_csv('s3://warehouse/Dados_Raw/opencellid_pt.csv', sep=',', storage_options=MINIO_OPTIONS)
+    logger.info(
+        "Raw carregado: logs=%s cdr=%s call_tests=%s towers=%s",
+        len(df_logs), len(df_cdr), len(df_call), len(df_towers),
+    )
 
-    print("=== FASE 2: TRANSFORMAÇÃO E SIMULAÇÃO (LEIRIA) ===")
+    logger.info("Fase 2: transformação e simulação (Leiria)")
     # Translação Geográfica (Leiria)
     lat_offset = 39.7436 - 18.11
     lon_offset = -8.8071 - 83.40
@@ -49,7 +62,7 @@ def gerar_camada_bronze() -> str:
     df_logs = pd.concat(logs_expandidos, ignore_index=True)
 
     # Garantir o Cruzamento
-    print("A criar um 'Bairro' de clientes afetados com chaves cruzadas...")
+    logger.info("A atribuir phone numbers Leiria para logs e call tests")
     np.random.seed(42)
     unique_phones = df_cdr['Phone Number'].dropna().unique()
     clientes_leiria = np.random.choice(unique_phones, size=2500, replace=False)
@@ -58,8 +71,8 @@ def gerar_camada_bronze() -> str:
     df_call['Phone_Number'] = np.random.choice(clientes_leiria, size=len(df_call))
 
     # Histórico Diário das Antenas
-    print("A criar snapshots diários do inventário de Antenas...")
     dias_simulacao = pd.date_range(start='2026-01-20', end='2026-02-04', freq='D')
+    logger.info("A criar snapshots diários do inventário de antenas (%s dias)", len(dias_simulacao))
     snapshots_torres = []
     
     np.random.seed(42)
@@ -76,7 +89,7 @@ def gerar_camada_bronze() -> str:
     df_towers_leiria = pd.concat(snapshots_torres, ignore_index=True)
 
     # TEMPESTADE (28 a 30 de Janeiro)
-    print("A injetar o desastre de Leiria...")
+    logger.info("A injetar cenário tempestade (28–30 Jan); torres leste afetadas=%s", len(torres_destruidas_indices))
     inicio_tempestade = pd.to_datetime('2026-01-28 00:00:00')
     fim_tempestade = pd.to_datetime('2026-01-30 23:59:59')
 
@@ -118,13 +131,13 @@ def gerar_camada_bronze() -> str:
     if 'DeviceID' in df_logs.columns:
         df_logs = df_logs.drop(columns=['DeviceID'])
 
-    print("=== FASE 3: ESCRITA DOS DADOS BRONZE NO MINIO ===")
+    logger.info("Fase 3: escrita bronze no MinIO (logs=%s rows)", len(df_logs))
     # Gravar diretamente para a pasta Dados_Bronze no MinIO!
     df_logs.to_csv('s3://warehouse/Dados_Bronze/Bronze_Network_Logs_Leiria.csv', index=False, sep=';', storage_options=MINIO_OPTIONS)
     df_cdr.to_csv('s3://warehouse/Dados_Bronze/Bronze_CDR_Customers.csv', index=False, sep=';', storage_options=MINIO_OPTIONS)
     df_call.to_csv('s3://warehouse/Dados_Bronze/Bronze_Call_Tests.csv', index=False, sep=';', storage_options=MINIO_OPTIONS)
     df_towers_leiria.to_csv('s3://warehouse/Dados_Bronze/Bronze_Towers_Leiria.csv', index=False, sep=',', storage_options=MINIO_OPTIONS) 
-    
+    logger.info("Bronze gravado no MinIO com sucesso")
     return "Fase 1 (Raw -> Bronze) concluída com sucesso! Os ficheiros estão no MinIO."
 
 @workflow
@@ -135,4 +148,5 @@ def pipeline_extracao_bronze() -> str:
 
 if __name__ == "__main__":
     # Permite testar o código localmente como um script normal de Python
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
     print(pipeline_extracao_bronze())
