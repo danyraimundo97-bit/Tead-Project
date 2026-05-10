@@ -19,35 +19,38 @@ medallion_image = ImageSpec(
 def process_towers_to_silver(minio_access: str, minio_secret: str) -> str:
     try:
         logger.info("🟢 Starting towers bronze -> silver")
+        # Connect to MinIO
         s3 = boto3.client('s3', endpoint_url='http://host.docker.internal:9000',
                           aws_access_key_id=minio_access, aws_secret_access_key=minio_secret)
         
+        # Download from Bronze
         logger.info("⏳ Downloading bronze/towers.csv from MinIO...")
         s3.download_file('warehouse', 'bronze/towers.csv', '/tmp/raw_towers.csv')
         
-        df = pd.read_csv('/tmp/raw_towers.csv')
+        # Read CSV
+        df = pd.read_csv('/tmp/raw_towers.csv', sep=',')
         
-        # --- THE FIX: RENAME COLUMNS TO MATCH TRINO EXACTLY ---
+        # RENAME COLUMNS TO MATCH TRINO
         df.rename(columns={
             'range': 'range_m',
             'averageSignal': 'average_signal',
             'Snapshot_Date': 'snapshot_date',
             'Status': 'status'
         }, inplace=True)
-        # Ensure everything is perfectly lowercase just to be safe
+
+        # Ensure everything is lowercase
         df.columns = df.columns.str.lower()
         
-        initial_count = len(df)
-        leiria_towers = df[
-            (df['lat'] >= 39.5) & (df['lat'] <= 39.9) &
-            (df['lon'] >= -9.0) & (df['lon'] <= -8.6)
-        ]
-        final_count = len(leiria_towers)
-        logger.info(f"📍 Geographic filter: {initial_count} national towers -> {final_count} in Leiria")
+        final_count = len(df)
+
+        logger.info(f"📍 Preparing {final_count} daily tower snapshots for Silver Layer")
         
-        leiria_towers.to_parquet('/tmp/clean_towers.parquet', engine='pyarrow', index=False)
+        # Upload to Staging
+        # Guardar em formato Parquet para Pushdown e eficiência de I/O no Trino
+        df.to_parquet('/tmp/clean_towers.parquet', engine='pyarrow', index=False)
         s3.upload_file('/tmp/clean_towers.parquet', 'warehouse', 'staging/towers/data.parquet')
         
+        # Load to Iceberg via Trino
         logger.info("⏳ Loading into Iceberg via Trino...")
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
@@ -76,7 +79,7 @@ def process_towers_to_silver(minio_access: str, minio_secret: str) -> str:
         """)
         cur.fetchall()
         
-        cur.execute("DELETE FROM iceberg.silver.towers")
+        cur.execute("TRUNCATE TABLE iceberg.silver.towers")
         cur.fetchall()
         
         cur.execute("INSERT INTO iceberg.silver.towers SELECT * FROM hive.staging.temp_towers")
@@ -86,7 +89,7 @@ def process_towers_to_silver(minio_access: str, minio_secret: str) -> str:
         cur.fetchall()
         
         logger.info(f"✅ Towers silver load finished ({final_count} rows)")
-        return f"Successfully loaded {final_count} Leiria Towers to Silver!"
+        return f"Successfully loaded {final_count} Tower records to Silver!"
 
     except Exception as e:
         logger.error(f"❌ TASK FAILED: {str(e)}")

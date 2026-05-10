@@ -19,9 +19,11 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
     """Cleans Network Logs, applies GPS offset, and uploads partitioned by Day."""
     try:
         logger.info("Starting network logs bronze -> silver for date=%s", target_date_str)
+        # Connect to MinIO
         s3 = boto3.client('s3', endpoint_url='http://host.docker.internal:9000',
                           aws_access_key_id=minio_access, aws_secret_access_key=minio_secret)
 
+        # Download from Bronze
         logger.info("Downloading bronze/network_logs.csv from MinIO")
         s3.download_file('warehouse', 'bronze/network_logs.csv', '/tmp/raw_logs.csv')
 
@@ -29,7 +31,14 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
         df = pd.read_csv('/tmp/raw_logs.csv', sep=';')
 
         # Standardize columns
-        df.columns = df.columns.str.strip().str.replace(' ', '_').str.replace('(', '').str.replace(')', '').str.lower()
+        df.columns = df.columns.str.strip().str.lower()
+        df.rename(columns={
+            'network provi.': 'network_provider',
+            'networktype': 'network_type',
+            'downlink(mbps)': 'downlink_mbps',
+            'uplink(mbps)': 'uplink_mbps',
+            'velocity(km/h)': 'velocity_kmh'
+        }, inplace=True)
 
         logger.info("🔧 Cleaning decimal formatting and enforcing numeric types...")
         numeric_cols = [
@@ -38,7 +47,9 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
         ]
         
         total_rows = len(df)
-        # in the saphety check, i want to check if one of the numeric columns does not match the with the df.columns, i want raise an error and stop the pipeline, because it means the source data has changed and our cleaning logic might be broken. So we want to catch that early before we do any damage.  
+
+        # Data Quality Gate
+        # in the safety check, i want to check if one of the numeric columns does not match the with the df.columns, i want raise an error and stop the pipeline, because it means the source data has changed and our cleaning logic might be broken. So we want to catch that early before we do any damage.  
         for col in numeric_cols:
             if col not in df.columns:
                 error_msg = f"❌ DATA STRUCTURE CHANGE: Expected column '{col}' not found in source data! Pipeline halted to prevent corruption."
@@ -46,17 +57,17 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
                 raise ValueError(error_msg)
             
             if col in df.columns:
-                # 1. Save the "Before" state (handling any raw blanks)
+                # Save the "Before" state (handling any raw blanks)
                 raw_values = df[col].replace(['', '-', ' '], None).copy()
                 
-                # 2. Perform the aggressive cleaning
+                # Perform the aggressive cleaning
                 clean_col = df[col].astype(str).str.replace(',', '.')
                 clean_col = clean_col.str.replace(r'[a-zA-Z\s]', '', regex=True)
                 clean_col = clean_col.replace(['', '-'], None)
                 cleaned_values = pd.to_numeric(clean_col, errors='coerce')
                 
-                # 3. THE AUDIT: Find rows that HAD data, but now HAVE NO data
-                # (Meaning our regex/conversion destroyed it)
+                # Find rows that HAD data, but now HAVE NO data
+                # (regex/conversion destroyed it)
                 destroyed_mask = raw_values.notna() & cleaned_values.isna()
                 destroyed_count = destroyed_mask.sum()
                 logger.debug(f"Column '{col}': {destroyed_count} values destroyed out of {total_rows} total rows.")
@@ -67,7 +78,7 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
                     logger.warning(f"⚠️ AUDIT WARNING: Column '{col}' had {destroyed_count} values destroyed during cleaning.")
                     logger.warning(f"   -> Example destroyed values: {sample_wiped}")
                     
-                    # 4. THE CIRCUIT BREAKER: If more than 5% of data is wiped, crash the pipeline!
+                    # THE CIRCUIT BREAKER: If more than 5% of data is wiped, crash the pipeline!
                     failure_rate = destroyed_count / total_rows
                     if failure_rate > 0.05:
                         error_msg = f"❌ DATA QUALITY BREACH: '{col}' lost {failure_rate*100:.1f}% of its data! Pipeline halted to prevent corruption."
@@ -77,30 +88,21 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
                 # If we pass the audit, officially apply the cleaned data to the dataframe
                 df[col] = cleaned_values
 
-        df.rename(columns={
-            'phone_number': 'phone_number',
-            'network_provi.': 'network_provider',
-            'networktype': 'network_type'
-        }, inplace=True)
-
         # Drop rows missing GPS
         before_gps = len(df)
         df.dropna(subset=['latitude', 'longitude'], inplace=True)
         logger.info("Dropped %s rows with missing lat/lon (%s rows remain)", before_gps - len(df), len(df))
 
-        # Apply Leiria Geographic Translation
-        df['latitude'] = df['latitude'] + 21.63
-        df['longitude'] = df['longitude'] - 92.20
-
-        # Filter by the target date
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        daily_df = df[df['timestamp'].dt.strftime('%Y-%m-%d') == target_date_str]
+        # Filter by the target date (errors='coerce' por segurança)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        daily_df = df[df['timestamp'].dt.strftime('%Y-%m-%d') == target_date_str].copy()
 
         if daily_df.empty:
             logger.warning("No network logs for date=%s; skipping", target_date_str)
             return f"No Network Logs found for {target_date_str}. Skipping."
 
         logger.info("Filtered network logs to %s rows for date=%s", len(daily_df), target_date_str)
+        
         # Upload to Staging
         # We rename 'timestamp' to 'timestamp_log' to match our Trino schema
         daily_df.rename(columns={'timestamp': 'timestamp_log'}, inplace=True)
@@ -116,6 +118,8 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
 
         safe_date = target_date_str.replace('-','')
 
+        temp_location = staging_key.replace('/data.parquet', '')
+
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS hive.staging.temp_logs_{safe_date} (
                 timestamp_log TIMESTAMP(3), devicemake VARCHAR, devicemodel VARCHAR,
@@ -123,17 +127,7 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
                 rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
                 uplink_mbps DOUBLE, velocity_kmh DOUBLE, latitude DOUBLE,
                 longitude DOUBLE, phone_number VARCHAR
-            ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/{staging_key.replace('/data.parquet', '')}/')
-        """)
-        cur.fetchall()
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS hive.staging.temp_towers (
-                radio VARCHAR, mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER,
-                unit BIGINT, lon DOUBLE, lat DOUBLE, range_m INTEGER, samples INTEGER,
-                changeable INTEGER, created VARCHAR, updated VARCHAR, average_signal DOUBLE,
-                snapshot_date VARCHAR, status VARCHAR
-            ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/staging/towers/')
+            ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/{temp_location}/')
         """)
         cur.fetchall()
 
@@ -150,6 +144,10 @@ def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str
                 longitude DOUBLE, phone_number VARCHAR
             )
         """)
+        cur.fetchall()
+
+        logger.info(f"🧹 Limpar dados antigos do dia {target_date_str} para evitar duplicados...")
+        cur.execute(f"DELETE FROM iceberg.silver.network_logs WHERE CAST(timestamp_log AS DATE) = DATE '{target_date_str}'")
         cur.fetchall()
 
         cur.execute(f"""

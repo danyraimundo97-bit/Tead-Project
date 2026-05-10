@@ -19,15 +19,15 @@ def process_cdr_to_silver(minio_access: str, minio_secret: str) -> str:
     """Downloads Bronze CDR, deduplicates it, and uploads to Silver Iceberg."""
     try:
         logger.info("Starting CDR bronze -> silver")
-        # 1. Connect to MinIO
+        # Connect to MinIO
         s3 = boto3.client('s3', endpoint_url='http://host.docker.internal:9000',
                           aws_access_key_id=minio_access, aws_secret_access_key=minio_secret)
 
-        # 2. Download from Bronze
+        # Download from Bronze
         logger.info("Downloading bronze/cdr_customers.csv from MinIO")
         s3.download_file('warehouse', 'bronze/cdr_customers.csv', '/tmp/raw_cdr.csv')
 
-        # 3. Clean with Pandas
+        # Read CSV
         df = pd.read_csv('/tmp/raw_cdr.csv', sep=';')
         initial_rows = len(df)
 
@@ -40,12 +40,12 @@ def process_cdr_to_silver(minio_access: str, minio_secret: str) -> str:
         final_rows = len(df)
         logger.info("Deduplicated CDR: %s rows in, %s rows out (removed %s)", initial_rows, final_rows, initial_rows - final_rows)
 
-        # 4. Upload to Staging
+        # Upload to Staging
         df.to_parquet('/tmp/clean_cdr.parquet', engine='pyarrow', index=False)
         s3.upload_file('/tmp/clean_cdr.parquet', 'warehouse', 'staging/cdr/data.parquet')
         logger.info("Uploaded staging parquet; loading Iceberg silver.cdr_customers (full replace)")
 
-        # 5. Load to Iceberg via Trino (Full Replace since it's a dimension table)
+        # Load to Iceberg via Trino (Full Replace since it's a dimension table)
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
 
@@ -77,7 +77,7 @@ def process_cdr_to_silver(minio_access: str, minio_secret: str) -> str:
         """)
         cur.fetchall()
 
-        cur.execute("DELETE FROM iceberg.silver.cdr_customers")
+        cur.execute("TRUNCATE TABLE iceberg.silver.cdr_customers")
         cur.fetchall()
 
         cur.execute("INSERT INTO iceberg.silver.cdr_customers SELECT * FROM hive.staging.temp_cdr")
