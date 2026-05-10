@@ -6,27 +6,6 @@ from loki_logging import get_logger
 
 logger = get_logger(__name__)
 
-_REQUIRED_SILVER_TABLES = frozenset(
-    {"network_logs", "cdr_customers", "call_tests", "towers"}
-)
-
-
-def _assert_silver_tables_exist(cur) -> None:
-    cur.execute(
-        """
-        SELECT table_name FROM iceberg.information_schema.tables
-        WHERE table_schema = 'silver'
-        """
-    )
-    found = {row[0] for row in cur.fetchall()}
-    missing = _REQUIRED_SILVER_TABLES - found
-    if missing:
-        raise ValueError(
-            "Cannot build gold: iceberg.silver is missing table(s) "
-            f"{sorted(missing)}. Load silver first."
-        )
-
-
 medallion_image = ImageSpec(
     name="jdpt_lakehouse_gold",
     packages=["trino", "python-logging-loki"],
@@ -40,10 +19,6 @@ def build_gold_churn_risk() -> str:
         logger.info("Building gold table iceberg.gold.churn_risk_daily")
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
-
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.gold")
-        cur.fetchall()
-        _assert_silver_tables_exist(cur)
 
         sql = """
         CREATE OR REPLACE TABLE iceberg.gold.churn_risk_daily AS

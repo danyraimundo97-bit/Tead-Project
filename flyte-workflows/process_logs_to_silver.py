@@ -116,9 +116,6 @@ def process_logs_to_silver(target_date_str: str) -> str:
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
 
-        cur.execute("CREATE SCHEMA IF NOT EXISTS hive.staging WITH (location = 's3a://warehouse/staging/')")
-        cur.fetchall()
-
         safe_date = target_date_str.replace('-','')
 
         temp_location = staging_key.replace('/data.parquet', '')
@@ -131,21 +128,6 @@ def process_logs_to_silver(target_date_str: str) -> str:
                 uplink_mbps DOUBLE, velocity_kmh DOUBLE, latitude DOUBLE,
                 longitude DOUBLE, phone_number VARCHAR
             ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/{temp_location}/')
-        """)
-        cur.fetchall()
-
-        logger.info("⏳ Ensuring Iceberg schema and table exist for Network Logs...")
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver WITH (location = 's3a://warehouse/silver/')")
-        cur.fetchall()
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS iceberg.silver.network_logs (
-                timestamp_log TIMESTAMP(3), devicemake VARCHAR, devicemodel VARCHAR,
-                network_provider VARCHAR, network_type VARCHAR, rsrp DOUBLE,
-                rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
-                uplink_mbps DOUBLE, velocity_kmh DOUBLE, latitude DOUBLE,
-                longitude DOUBLE, phone_number VARCHAR
-            )
         """)
         cur.fetchall()
 

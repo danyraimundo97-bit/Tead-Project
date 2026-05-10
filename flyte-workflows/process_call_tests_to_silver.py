@@ -61,9 +61,6 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
 
-        cur.execute("CREATE SCHEMA IF NOT EXISTS hive.staging WITH (location = 's3a://warehouse/staging/')")
-        cur.fetchall()
-
         safe_date = target_date_str.replace('-','')
         temp_location = staging_key.replace('/data.parquet', '')
         
@@ -76,19 +73,6 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
         """)
         cur.fetchall()
 
-        logger.info("⏳ Ensuring Iceberg schema and table exist...")
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver WITH (location = 's3a://warehouse/silver/')")
-        cur.fetchall()
-            
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS iceberg.silver.call_tests (
-                date_of_test TIMESTAMP(3), signal_dbm DOUBLE, speed_m_s DOUBLE, 
-                distance_from_site_m DOUBLE, call_test_duration_s DOUBLE, call_test_result VARCHAR, 
-                call_test_technology VARCHAR, call_test_setup_time_s DOUBLE, mos DOUBLE, phone_number VARCHAR
-            )
-        """)
-        cur.fetchall()
-        
         logger.info(f"🧹 Limpar dados antigos do dia {target_date_str} para evitar duplicados...")
         cur.execute(f"DELETE FROM iceberg.silver.call_tests WHERE CAST(date_of_test AS DATE) = DATE '{target_date_str}'")
         cur.fetchall()

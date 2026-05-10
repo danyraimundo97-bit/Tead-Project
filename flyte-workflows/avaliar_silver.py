@@ -10,6 +10,7 @@ from flytekit import task, ImageSpec
 
 from flyte_task_env import TASK_ENV
 from loki_logging import get_logger
+from ensure_pipeline_layers import assert_silver_tables_exist
 
 medallion_image = ImageSpec(
     name="jdpt_lakehouse_env",
@@ -18,26 +19,6 @@ medallion_image = ImageSpec(
 )
 
 logger = get_logger(__name__)
-
-_REQUIRED_SILVER_TABLES = frozenset(
-    {"network_logs", "cdr_customers", "call_tests", "towers"}
-)
-
-
-def _assert_silver_layer_ready(cur) -> None:
-    cur.execute(
-        """
-        SELECT table_name FROM iceberg.information_schema.tables
-        WHERE table_schema = 'silver'
-        """
-    )
-    found = {row[0] for row in cur.fetchall()}
-    missing = _REQUIRED_SILVER_TABLES - found
-    if missing:
-        raise ValueError(
-            "iceberg.silver is not ready: missing table(s) "
-            f"{sorted(missing)}. Run the silver tasks after a clean or first deploy."
-        )
 
 
 @task(container_image=medallion_image, environment=TASK_ENV)
@@ -55,7 +36,9 @@ def avaliar_silver():
             catalog='iceberg'
         )
         cur = conn.cursor()
-        _assert_silver_layer_ready(cur)
+        assert_silver_tables_exist(
+            cur, detail="Avaliação silver:"
+        )
 
         query_logs = "SELECT * FROM iceberg.silver.network_logs LIMIT 100"
         query_cdr = "SELECT * FROM iceberg.silver.cdr_customers LIMIT 100"

@@ -46,9 +46,6 @@ def process_cdr_to_silver() -> str:
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
 
-        cur.execute("CREATE SCHEMA IF NOT EXISTS hive.staging WITH (location = 's3a://warehouse/staging/')")
-        cur.fetchall()
-
         cur.execute("""
             CREATE TABLE IF NOT EXISTS hive.staging.temp_cdr (
                 phone_number VARCHAR, account_length INTEGER, vmail_message INTEGER,
@@ -58,22 +55,6 @@ def process_cdr_to_silver() -> str:
                 intl_mins DOUBLE, intl_calls INTEGER, intl_charge DOUBLE,
                 custserv_calls INTEGER, churn BOOLEAN
             ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/staging/cdr/')
-        """)
-        cur.fetchall()
-
-        logger.info("⏳ Ensuring Iceberg schema and table exist for CDR...")
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver WITH (location = 's3a://warehouse/silver/')")
-        cur.fetchall()
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS iceberg.silver.cdr_customers (
-                phone_number VARCHAR, account_length INTEGER, vmail_message INTEGER,
-                day_mins DOUBLE, day_calls INTEGER, day_charge DOUBLE,
-                eve_mins DOUBLE, eve_calls INTEGER, eve_charge DOUBLE,
-                night_mins DOUBLE, night_calls INTEGER, night_charge DOUBLE,
-                intl_mins DOUBLE, intl_calls INTEGER, intl_charge DOUBLE,
-                custserv_calls INTEGER, churn BOOLEAN
-            )
         """)
         cur.fetchall()
 
