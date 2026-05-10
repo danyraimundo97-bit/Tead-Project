@@ -94,6 +94,153 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.network_logs_quarantine_raw (
+            row_id VARCHAR,
+            "timestamp" VARCHAR,
+            deviceid VARCHAR,
+            devicemake VARCHAR,
+            devicemodel VARCHAR,
+            "network provi." VARCHAR,
+            networktype VARCHAR,
+            rsrp VARCHAR,
+            rsrq VARCHAR,
+            sinr VARCHAR,
+            pci VARCHAR,
+            "downlink(mbps)" VARCHAR,
+            "uplink(mbps)" VARCHAR,
+            "velocity(km/h)" VARCHAR,
+            latitude VARCHAR,
+            longitude VARCHAR,
+            phone_number VARCHAR
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.network_logs_quarantine_audit (
+            row_id VARCHAR,
+            line_number BIGINT,
+            source_file VARCHAR,
+            error_description VARCHAR,
+            loaded_at TIMESTAMP(3)
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.cdr_quarantine_raw (
+            row_id VARCHAR,
+            phone_number VARCHAR,
+            account_length VARCHAR,
+            vmail_message VARCHAR,
+            day_mins VARCHAR,
+            day_calls VARCHAR,
+            day_charge VARCHAR,
+            eve_mins VARCHAR,
+            eve_calls VARCHAR,
+            eve_charge VARCHAR,
+            night_mins VARCHAR,
+            night_calls VARCHAR,
+            night_charge VARCHAR,
+            intl_mins VARCHAR,
+            intl_calls VARCHAR,
+            intl_charge VARCHAR,
+            custserv_calls VARCHAR,
+            churn VARCHAR
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.cdr_quarantine_audit (
+            row_id VARCHAR,
+            line_number BIGINT,
+            source_file VARCHAR,
+            error_description VARCHAR,
+            loaded_at TIMESTAMP(3)
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.call_tests_quarantine_raw (
+            row_id VARCHAR,
+            date_of_test VARCHAR,
+            signal_dbm VARCHAR,
+            speed_m_s VARCHAR,
+            distance_from_site_m VARCHAR,
+            call_test_duration_s VARCHAR,
+            call_test_result VARCHAR,
+            call_test_technology VARCHAR,
+            call_test_setup_time_s VARCHAR,
+            mos VARCHAR,
+            phone_number VARCHAR
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.call_tests_quarantine_audit (
+            row_id VARCHAR,
+            line_number BIGINT,
+            source_file VARCHAR,
+            error_description VARCHAR,
+            loaded_at TIMESTAMP(3)
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.towers_quarantine_raw (
+            row_id VARCHAR,
+            radio VARCHAR,
+            mcc VARCHAR,
+            net VARCHAR,
+            area VARCHAR,
+            cell VARCHAR,
+            unit VARCHAR,
+            lon VARCHAR,
+            lat VARCHAR,
+            range_m VARCHAR,
+            samples VARCHAR,
+            changeable VARCHAR,
+            created VARCHAR,
+            updated VARCHAR,
+            average_signal VARCHAR,
+            snapshot_date VARCHAR,
+            status VARCHAR
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.silver.towers_quarantine_audit (
+            row_id VARCHAR,
+            line_number BIGINT,
+            source_file VARCHAR,
+            error_description VARCHAR,
+            loaded_at TIMESTAMP(3)
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS iceberg.silver.call_tests (
             date_of_test TIMESTAMP(3), signal_dbm DOUBLE, speed_m_s DOUBLE,
             distance_from_site_m DOUBLE, call_test_duration_s DOUBLE, call_test_result VARCHAR,
