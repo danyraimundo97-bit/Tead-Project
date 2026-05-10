@@ -1,4 +1,8 @@
-"""Reset the Silver layer: drop Trino Iceberg/Hive schemas and remove silver staging objects in MinIO."""
+"""Reset the Silver layer in Trino and MinIO.
+
+Drops ``iceberg.silver`` and ``hive.staging`` (CASCADE). Silver tasks always run
+``CREATE SCHEMA IF NOT EXISTS`` for both before creating tables, so the next
+pipeline run recreates them."""
 
 from __future__ import annotations
 
@@ -49,7 +53,7 @@ def _purge_s3_prefix(s3_client, bucket: str, prefix: str) -> int:
 
 @task(container_image=medallion_image, environment=TASK_ENV)
 def clean_silver_layer() -> str:
-    """Drop silver Trino schemas and remove silver staging files from MinIO (not bronze or gold)."""
+    """Drop iceberg.silver and hive.staging, then purge silver staging keys in MinIO."""
     logger.info("Dropping iceberg.silver and hive.staging in Trino")
     conn = trino.dbapi.connect(
         host="host.docker.internal", port=8080, user="flyte", catalog="iceberg"

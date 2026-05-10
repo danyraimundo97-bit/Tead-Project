@@ -61,6 +61,9 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
 
+        cur.execute("CREATE SCHEMA IF NOT EXISTS hive.staging WITH (location = 's3a://warehouse/staging/')")
+        cur.fetchall()
+
         safe_date = target_date_str.replace('-','')
         temp_location = staging_key.replace('/data.parquet', '')
         
@@ -74,7 +77,7 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
         cur.fetchall()
 
         logger.info("⏳ Ensuring Iceberg schema and table exist...")
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver")
+        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver WITH (location = 's3a://warehouse/silver/')")
         cur.fetchall()
             
         cur.execute("""

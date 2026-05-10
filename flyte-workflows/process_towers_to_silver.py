@@ -51,7 +51,10 @@ def process_towers_to_silver() -> str:
         logger.info("⏳ Loading into Iceberg via Trino...")
         conn = trino.dbapi.connect(host='host.docker.internal', port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
-        
+
+        cur.execute("CREATE SCHEMA IF NOT EXISTS hive.staging WITH (location = 's3a://warehouse/staging/')")
+        cur.fetchall()
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS hive.staging.temp_towers (
                 radio VARCHAR, mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER, 
@@ -63,7 +66,7 @@ def process_towers_to_silver() -> str:
         cur.fetchall()
 
         logger.info("⏳ Ensuring Iceberg schema and table exist...")
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver")
+        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.silver WITH (location = 's3a://warehouse/silver/')")
         cur.fetchall()
         
         cur.execute("""

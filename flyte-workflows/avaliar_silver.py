@@ -19,6 +19,26 @@ medallion_image = ImageSpec(
 
 logger = get_logger(__name__)
 
+_REQUIRED_SILVER_TABLES = frozenset(
+    {"network_logs", "cdr_customers", "call_tests", "towers"}
+)
+
+
+def _assert_silver_layer_ready(cur) -> None:
+    cur.execute(
+        """
+        SELECT table_name FROM iceberg.information_schema.tables
+        WHERE table_schema = 'silver'
+        """
+    )
+    found = {row[0] for row in cur.fetchall()}
+    missing = _REQUIRED_SILVER_TABLES - found
+    if missing:
+        raise ValueError(
+            "iceberg.silver is not ready: missing table(s) "
+            f"{sorted(missing)}. Run the silver tasks after a clean or first deploy."
+        )
+
 
 @task(container_image=medallion_image, environment=TASK_ENV)
 def avaliar_silver():
@@ -34,7 +54,8 @@ def avaliar_silver():
             user='flyte', 
             catalog='iceberg'
         )
-
+        cur = conn.cursor()
+        _assert_silver_layer_ready(cur)
 
         query_logs = "SELECT * FROM iceberg.silver.network_logs LIMIT 100"
         query_cdr = "SELECT * FROM iceberg.silver.cdr_customers LIMIT 100"
