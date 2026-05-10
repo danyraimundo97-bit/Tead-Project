@@ -1,9 +1,8 @@
 import pandas as pd
-import boto3
 import trino
 from flytekit import task, ImageSpec
 
-from flyte_task_env import TASK_ENV
+from flyte_task_env import TASK_ENV, minio_s3_client
 from loki_logging import get_logger
 
 logger = get_logger(__name__)
@@ -15,13 +14,11 @@ medallion_image = ImageSpec(
 )
 
 @task(container_image=medallion_image, environment=TASK_ENV)
-def process_logs_to_silver(minio_access: str, minio_secret: str, target_date_str: str) -> str:
+def process_logs_to_silver(target_date_str: str) -> str:
     """Cleans Network Logs, applies GPS offset, and uploads partitioned by Day."""
     try:
         logger.info("Starting network logs bronze -> silver for date=%s", target_date_str)
-        # Connect to MinIO
-        s3 = boto3.client('s3', endpoint_url='http://host.docker.internal:9000',
-                          aws_access_key_id=minio_access, aws_secret_access_key=minio_secret)
+        s3 = minio_s3_client()
 
         # Download from Bronze
         logger.info("Downloading bronze/network_logs.csv from MinIO")

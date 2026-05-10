@@ -1,10 +1,9 @@
 import pandas as pd
-import boto3
 import trino
 from botocore.exceptions import ClientError
 from flytekit import task, ImageSpec
 
-from flyte_task_env import TASK_ENV
+from flyte_task_env import TASK_ENV, minio_s3_client
 from loki_logging import get_logger
 
 logger = get_logger(__name__)
@@ -16,12 +15,10 @@ medallion_image = ImageSpec(
 )
 
 @task(container_image=medallion_image, environment=TASK_ENV)
-def process_towers_to_silver(minio_access: str, minio_secret: str) -> str:
+def process_towers_to_silver() -> str:
     try:
         logger.info("🟢 Starting towers bronze -> silver")
-        # Connect to MinIO
-        s3 = boto3.client('s3', endpoint_url='http://host.docker.internal:9000',
-                          aws_access_key_id=minio_access, aws_secret_access_key=minio_secret)
+        s3 = minio_s3_client()
         
         # Download from Bronze
         logger.info("⏳ Downloading bronze/towers.csv from MinIO...")

@@ -1,39 +1,42 @@
-from flytekit import task, workflow, LaunchPlan, ImageSpec
-
-from flyte_task_env import TASK_ENV
-from loki_logging import get_logger
-
-logger = get_logger(__name__)
-
-workflow_tools_image = ImageSpec(
-    name="jdpt_lakehouse_workflow_tools",
-    packages=["python-logging-loki"],
-    registry="localhost:30000",
-)
-
-
-@task(container_image=workflow_tools_image, environment=TASK_ENV)
-def check_mlflow_config(mlflow_url: str, minio_access: str, minio_secret: str) -> str:
-    try:
-        logger.info("check_mlflow_config: validating inputs (mlflow_url=%s)", mlflow_url)
-        return f"URL: {mlflow_url} | Access: {minio_access} | Secret: {minio_secret}"
-    except Exception as e:
-        logger.error(f"❌ TASK FAILED: {str(e)}")
-        raise Exception(f"Captured Task Error: {str(e)}")
+from flytekit import workflow
+from process_call_tests_to_silver import process_call_tests_to_silver
+from process_cdr_to_silver import process_cdr_to_silver
+from process_logs_to_silver import process_logs_to_silver
+from process_towers_to_silver import process_towers_to_silver
+from build_gold_churn_risk import build_gold_churn_risk
+from avaliar_silver import avaliar_silver
 
 @workflow
-def my_workflow(mlflow_url: str, minio_access: str, minio_secret: str) -> str:
-    return check_mlflow_config(mlflow_url=mlflow_url, minio_access=minio_access, minio_secret=minio_secret)
+def jdpt_lakehouse_pipeline(target_date_str: str) -> str:
+    
+    # ---------------------------------------------------------
+    # STEP 1: The Silver Layer (These 4 run in parallel!)
+    # ---------------------------------------------------------
+    silver_cdr = process_cdr_to_silver()
 
-local_compose_config = LaunchPlan.get_or_create(
-    name="workflow_compose_config",
-    workflow=my_workflow,
-    default_inputs={
-        "mlflow_url": "http://host.docker.internal:9000",
-        "minio_access": "minioadmin",
-        "minio_secret": "minioadmin" 
-    }
-)
+    silver_logs = process_logs_to_silver(target_date_str=target_date_str)
 
-if __name__ == "__main__":
-    print(my_workflow(mlflow_url="http://host.docker.internal:9000", minio_access="minioadmin", minio_secret="minioadmin"))
+    silver_tests = process_call_tests_to_silver(target_date_str=target_date_str)
+
+    silver_towers = process_towers_to_silver()
+
+    silver_aval = avaliar_silver() # This is just a check task to validate the Silver layer before we build Gold. It doesn't return anything, just logs info.
+
+    
+    # ---------------------------------------------------------
+    # STEP 2: The Gold Layer (The Data Products)
+    # ---------------------------------------------------------
+    gold_churn_risk = build_gold_churn_risk()
+    # gold_network_quality = build_gold_network_quality() # (If you made this task too!)
+
+    # ---------------------------------------------------------
+    # STEP 3: The Rules (Dependencies)
+    # ---------------------------------------------------------
+    # We force the Gold task to wait for the required Silver tasks
+    silver_cdr >> silver_aval
+    silver_tests >> silver_aval
+    silver_logs >> silver_aval
+    silver_towers >> silver_aval
+    silver_aval >> gold_churn_risk
+    
+    return f"Lakehouse successfully updated for {target_date_str}!"
