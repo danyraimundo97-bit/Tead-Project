@@ -213,7 +213,22 @@ def process_cdr_to_silver() -> str:
         cur.execute("TRUNCATE TABLE iceberg.silver.cdr_customers")
         cur.fetchall()
 
-        cur.execute("INSERT INTO iceberg.silver.cdr_customers SELECT * FROM hive.staging.temp_cdr")
+        cur.execute(
+            """
+            INSERT INTO iceberg.silver.cdr_customers (
+                silver_row_id, phone_number, account_length, vmail_message, day_mins, day_calls,
+                day_charge, eve_mins, eve_calls, eve_charge, night_mins, night_calls, night_charge,
+                intl_mins, intl_calls, intl_charge, custserv_calls, churn
+            )
+            SELECT
+                (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.cdr_customers)
+                    + ROW_NUMBER() OVER (ORDER BY phone_number),
+                phone_number, account_length, vmail_message, day_mins, day_calls, day_charge,
+                eve_mins, eve_calls, eve_charge, night_mins, night_calls, night_charge,
+                intl_mins, intl_calls, intl_charge, custserv_calls, churn
+            FROM hive.staging.temp_cdr
+            """
+        )
         cur.fetchall()
 
         cur.execute("DROP TABLE hive.staging.temp_cdr")

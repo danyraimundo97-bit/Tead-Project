@@ -231,8 +231,18 @@ def process_logs_to_silver(target_date_str: str) -> str:
 
         cur.execute(
             f"""
-            INSERT INTO iceberg.silver.network_logs
-            SELECT * FROM hive.staging.temp_logs_{safe_date}
+            INSERT INTO iceberg.silver.network_logs (
+                silver_row_id, timestamp_log, devicemake, devicemodel, network_provider,
+                network_type, rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
+                latitude, longitude, phone_number
+            )
+            SELECT
+                (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.network_logs)
+                    + ROW_NUMBER() OVER (ORDER BY timestamp_log, phone_number),
+                timestamp_log, devicemake, devicemodel, network_provider, network_type,
+                rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
+                latitude, longitude, phone_number
+            FROM hive.staging.temp_logs_{safe_date}
         """
         )
         cur.fetchall()

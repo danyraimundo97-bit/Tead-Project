@@ -68,6 +68,7 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS iceberg.silver.cdr_customers (
+            silver_row_id BIGINT NOT NULL,
             phone_number VARCHAR, account_length INTEGER, vmail_message INTEGER,
             day_mins DOUBLE, day_calls INTEGER, day_charge DOUBLE,
             eve_mins DOUBLE, eve_calls INTEGER, eve_charge DOUBLE,
@@ -82,6 +83,7 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS iceberg.silver.network_logs (
+            silver_row_id BIGINT NOT NULL,
             timestamp_log TIMESTAMP(3), devicemake VARCHAR, devicemodel VARCHAR,
             network_provider VARCHAR, network_type VARCHAR, rsrp DOUBLE,
             rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
@@ -242,6 +244,7 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS iceberg.silver.call_tests (
+            silver_row_id BIGINT NOT NULL,
             date_of_test TIMESTAMP(3), signal_dbm DOUBLE, speed_m_s DOUBLE,
             distance_from_site_m DOUBLE, call_test_duration_s DOUBLE, call_test_result VARCHAR,
             call_test_technology VARCHAR, call_test_setup_time_s DOUBLE, mos DOUBLE, phone_number VARCHAR
@@ -253,6 +256,7 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS iceberg.silver.towers (
+            silver_row_id BIGINT NOT NULL,
             radio VARCHAR, mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER,
             unit BIGINT, lon DOUBLE, lat DOUBLE, range_m INTEGER, samples INTEGER,
             changeable INTEGER, created VARCHAR, updated VARCHAR, average_signal DOUBLE,

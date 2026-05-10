@@ -176,7 +176,20 @@ def process_towers_to_silver() -> str:
         cur.execute("TRUNCATE TABLE iceberg.silver.towers")
         cur.fetchall()
 
-        cur.execute("INSERT INTO iceberg.silver.towers SELECT * FROM hive.staging.temp_towers")
+        cur.execute(
+            """
+            INSERT INTO iceberg.silver.towers (
+                silver_row_id, radio, mcc, net, area, cell, unit, lon, lat, range_m, samples,
+                changeable, created, updated, average_signal, snapshot_date, status
+            )
+            SELECT
+                (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.towers)
+                    + ROW_NUMBER() OVER (ORDER BY radio, mcc, net, area, cell),
+                radio, mcc, net, area, cell, unit, lon, lat, range_m, samples,
+                changeable, created, updated, average_signal, snapshot_date, status
+            FROM hive.staging.temp_towers
+            """
+        )
         cur.fetchall()
 
         cur.execute("DROP TABLE hive.staging.temp_towers")

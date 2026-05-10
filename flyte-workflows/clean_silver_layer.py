@@ -1,8 +1,8 @@
 """Reset the Silver layer in Trino and MinIO.
 
-Drops ``iceberg.silver`` and ``hive.staging`` (CASCADE). Silver tasks always run
-``CREATE SCHEMA IF NOT EXISTS`` for both before creating tables, so the next
-pipeline run recreates them."""
+Drops ``iceberg.silver`` (CASCADE: tabelas silver + quarentena) e ``hive.staging``.
+Purges MinIO: ``staging/*`` (parquet temporário) e ``silver/`` (ficheiros Iceberg da
+camada silver, incluindo quarentenas). A task ``ensure`` volta a criar schemas e tabelas."""
 
 from __future__ import annotations
 
@@ -22,13 +22,29 @@ medallion_image = ImageSpec(
 
 WAREHOUSE_BUCKET = "warehouse"
 
-# Parquet staging prefixes written by silver tasks (bronze/gold paths untouched)
+# Tabelas de quarentena em iceberg.silver (removidas pelo CASCADE; listadas para logs/documentação)
+SILVER_QUARANTINE_TABLES = (
+    "network_logs_quarantine_raw",
+    "network_logs_quarantine_audit",
+    "cdr_quarantine_raw",
+    "cdr_quarantine_audit",
+    "call_tests_quarantine_raw",
+    "call_tests_quarantine_audit",
+    "towers_quarantine_raw",
+    "towers_quarantine_audit",
+)
+
+# Parquet staging (hive.staging) — bronze/gold intactos
 SILVER_STAGING_PREFIXES = (
     "staging/cdr/",
     "staging/towers/",
     "staging/network_logs/",
     "staging/call_tests/",
 )
+
+# Localização do schema iceberg.silver (ensure_pipeline_layers): s3a://warehouse/silver/
+# Apaga ficheiros Iceberg das tabelas silver incluindo quarentenas após DROP SCHEMA
+SILVER_ICEBERG_PREFIX = "silver/"
 
 
 def _purge_s3_prefix(s3_client, bucket: str, prefix: str) -> int:
@@ -53,8 +69,11 @@ def _purge_s3_prefix(s3_client, bucket: str, prefix: str) -> int:
 
 @task(container_image=medallion_image, environment=TASK_ENV)
 def clean_silver_layer() -> str:
-    """Drop iceberg.silver and hive.staging, then purge silver staging keys in MinIO."""
-    logger.info("Dropping iceberg.silver and hive.staging in Trino")
+    """Drop iceberg.silver (inclui quarentenas via CASCADE), hive.staging; purge staging + silver/."""
+    logger.info(
+        "Removing iceberg.silver (CASCADE drops silver tables + quarantine: %s)",
+        ", ".join(SILVER_QUARANTINE_TABLES),
+    )
     conn = trino.dbapi.connect(
         host="host.docker.internal", port=8080, user="flyte", catalog="iceberg"
     )
@@ -79,9 +98,18 @@ def clean_silver_layer() -> str:
             "Removed %s objects under s3://%s/%s", n, WAREHOUSE_BUCKET, prefix
         )
 
+    n_silver = _purge_s3_prefix(s3, WAREHOUSE_BUCKET, SILVER_ICEBERG_PREFIX)
+    total_deleted += n_silver
+    logger.info(
+        "Removed %s objects under s3://%s/%s (Iceberg silver + quarantine data)",
+        n_silver,
+        WAREHOUSE_BUCKET,
+        SILVER_ICEBERG_PREFIX,
+    )
+
     msg = (
-        f"Silver layer reset: Trino schemas iceberg.silver + hive.staging dropped; "
-        f"removed {total_deleted} objects from MinIO under staging/cdr|towers|network_logs|call_tests."
+        f"Silver layer reset: iceberg.silver (incl. quarantine) + hive.staging dropped; "
+        f"removed {total_deleted} objects from MinIO (staging/* + {SILVER_ICEBERG_PREFIX})."
     )
     logger.info(msg)
     return msg

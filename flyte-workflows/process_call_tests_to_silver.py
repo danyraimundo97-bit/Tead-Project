@@ -203,8 +203,18 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
 
         cur.execute(
             f"""
-            INSERT INTO iceberg.silver.call_tests
-            SELECT * FROM hive.staging.temp_tests_{safe_date}
+            INSERT INTO iceberg.silver.call_tests (
+                silver_row_id, date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
+                call_test_duration_s, call_test_result, call_test_technology,
+                call_test_setup_time_s, mos, phone_number
+            )
+            SELECT
+                (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.call_tests)
+                    + ROW_NUMBER() OVER (ORDER BY date_of_test, phone_number),
+                date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
+                call_test_duration_s, call_test_result, call_test_technology,
+                call_test_setup_time_s, mos, phone_number
+            FROM hive.staging.temp_tests_{safe_date}
         """
         )
         cur.fetchall()
