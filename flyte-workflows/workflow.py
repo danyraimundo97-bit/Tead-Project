@@ -14,14 +14,14 @@ from build_gold_network_quality import build_gold_network_quality
 
 
 @workflow
-def jdpt_lakehouse_pipeline(target_date_str: str) -> str:
+def jdpt_lakehouse_pipeline() -> str:
     # 1) Ambiente + inputs bronze + DDL silver
     silver_env = ensure_silver_layer_environment()
 
-    # 2) Bronze → silver (paralelo)
+    # 2) Bronze → silver (paralelo; logs e call_tests = lote completo)
     silver_cdr = process_cdr_to_silver()
-    silver_logs = process_logs_to_silver(target_date_str=target_date_str)
-    silver_tests = process_call_tests_to_silver(target_date_str=target_date_str)
+    silver_logs = process_logs_to_silver()
+    silver_tests = process_call_tests_to_silver()
     silver_towers = process_towers_to_silver()
 
     # 3) Verificação dos dados / qualidade da camada silver
@@ -48,4 +48,4 @@ def jdpt_lakehouse_pipeline(target_date_str: str) -> str:
     gold_env >> gold_churn_risk
     gold_env >> gold_network_quality
 
-    return f"Lakehouse successfully updated for {target_date_str}!"
+    return "Lakehouse successfully updated (full batch)!"

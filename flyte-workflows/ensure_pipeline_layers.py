@@ -17,6 +17,10 @@ REQUIRED_SILVER_TABLES = frozenset(
     {"network_logs", "cdr_customers", "call_tests", "towers"}
 )
 
+REQUIRED_GOLD_TABLES = frozenset(
+    {"churn_risk_daily", "network_quality_daily"}
+)
+
 BRONZE_OBJECT_KEYS = (
     "bronze/cdr_customers.csv",
     "bronze/network_logs.csv",
@@ -29,6 +33,26 @@ ensure_image = ImageSpec(
     packages=["boto3", "trino", "python-logging-loki"],
     registry="localhost:30000",
 )
+
+
+def assert_gold_tables_exist(cur, *, detail: str = "") -> None:
+    """Garante que as tabelas Iceberg esperadas existem em ``iceberg.gold``."""
+    cur.execute(
+        """
+        SELECT table_name FROM iceberg.information_schema.tables
+        WHERE table_schema = 'gold'
+        """
+    )
+    found = {row[0] for row in cur.fetchall()}
+    missing = REQUIRED_GOLD_TABLES - found
+    if missing:
+        msg = (
+            f"iceberg.gold em falta: tabela(s) {sorted(missing)}. "
+            "Execute ensure_gold_layer_environment antes dos build gold."
+        )
+        if detail:
+            msg = f"{detail} {msg}"
+        raise ValueError(msg)
 
 
 def assert_silver_tables_exist(cur, *, detail: str = "") -> None:
@@ -273,6 +297,57 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
     cur.fetchall()
 
 
+def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
+    """Schema ``iceberg.gold`` com localização no warehouse e tabelas gold (Iceberg)."""
+    cur.execute(
+        "CREATE SCHEMA IF NOT EXISTS iceberg.gold "
+        "WITH (location = 's3a://warehouse/gold/')"
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.gold.churn_risk_daily (
+            snapshot_date DATE,
+            phone_number VARCHAR,
+            storm_affected BOOLEAN,
+            receita_em_risco DOUBLE,
+            account_length INTEGER,
+            total_chamadas_suporte INTEGER,
+            total_drops BIGINT,
+            qualidade_audio_mos DOUBLE,
+            churn BOOLEAN
+        ) WITH (
+            format = 'PARQUET',
+            partitioning = ARRAY['day(snapshot_date)']
+        )
+        """
+    )
+    cur.fetchall()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.gold.network_quality_daily (
+            date_of_test DATE,
+            zona_leiria VARCHAR,
+            radio VARCHAR,
+            cell INTEGER,
+            network_provider VARCHAR,
+            avg_rsrp DOUBLE,
+            avg_rsrq DOUBLE,
+            avg_sinr DOUBLE,
+            avg_downlink_mbps DOUBLE,
+            poor_signal_connections BIGINT,
+            total_connections BIGINT
+        ) WITH (
+            format = 'PARQUET',
+            partitioning = ARRAY['day(date_of_test)']
+        )
+        """
+    )
+    cur.fetchall()
+
+
 @task(container_image=ensure_image, environment=TASK_ENV)
 def ensure_silver_layer_environment() -> str:
     """Bronze no MinIO, Trino OK, schemas hive.staging / iceberg.silver e tabelas Iceberg silver."""
@@ -310,21 +385,24 @@ def ensure_silver_layer_environment() -> str:
 
 @task(container_image=ensure_image, environment=TASK_ENV)
 def ensure_gold_layer_environment() -> str:
-    """Schema gold e presença das tabelas silver antes do CTAS gold."""
+    """Silver populável + schema ``iceberg.gold`` e DDL das tabelas gold (como na camada silver)."""
     conn = trino.dbapi.connect(
         host="host.docker.internal", port=8080, user="flyte", catalog="iceberg"
     )
     cur = conn.cursor()
     try:
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.gold")
+        cur.execute("SELECT 1")
         cur.fetchall()
         assert_silver_tables_exist(cur, detail="Ambiente gold:")
+        ensure_gold_schemas_and_iceberg_tables(cur)
+        assert_gold_tables_exist(cur, detail="Pós-DDL gold:")
     finally:
         conn.close()
 
     msg = (
-        "Gold garantido: schema iceberg.gold e tabelas iceberg.silver "
-        f"({', '.join(sorted(REQUIRED_SILVER_TABLES))}) OK."
+        "Gold garantido: iceberg.gold em s3a://warehouse/gold/ com "
+        f"{len(REQUIRED_GOLD_TABLES)} tabela(s) ({', '.join(sorted(REQUIRED_GOLD_TABLES))}); "
+        f"iceberg.silver OK ({', '.join(sorted(REQUIRED_SILVER_TABLES))})."
     )
     logger.info(msg)
     return msg

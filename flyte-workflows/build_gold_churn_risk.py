@@ -1,118 +1,107 @@
 import trino
-from flytekit import task, ImageSpec
+from flytekit import ImageSpec, task
+
 from flyte_task_env import TASK_ENV
 from loki_logging import get_logger
 
 logger = get_logger(__name__)
 
-# Reutilizamos a imagem configurada para a camada Gold
 gold_image = ImageSpec(
     name="jdpt_lakehouse_gold",
     packages=["trino", "python-logging-loki"],
-    registry="localhost:30000"
+    registry="localhost:30000",
 )
 
+
+def _snapshot_dates_sql() -> str:
+    return """
+        SELECT DISTINCT CAST(date_of_test AS DATE) AS d
+        FROM iceberg.silver.call_tests
+        UNION
+        SELECT DISTINCT CAST(timestamp_log AS DATE) AS d
+        FROM iceberg.silver.network_logs
+        ORDER BY 1
+    """
+
+
+def _insert_one_snapshot_date(*, snapshot_date_sql: str) -> str:
+    """One day: CDR × at-most-one row per fact table — avoids cross-join blowups in Trino."""
+    return f"""
+        INSERT INTO iceberg.gold.churn_risk_daily
+        SELECT
+            DATE '{snapshot_date_sql}' AS snapshot_date,
+            cdr.phone_number,
+            COALESCE(al.storm_affected, FALSE) AS storm_affected,
+            (cdr.day_charge + cdr.eve_charge + cdr.night_charge + cdr.intl_charge)
+                AS receita_em_risco,
+            cdr.account_length,
+            cdr.custserv_calls AS total_chamadas_suporte,
+            COALESCE(ac.total_drops, CAST(0 AS BIGINT)) AS total_drops,
+            ac.qualidade_audio_mos,
+            cdr.churn
+        FROM iceberg.silver.cdr_customers cdr
+        LEFT JOIN (
+            SELECT
+                phone_number,
+                COUNT_IF(result = FALSE) AS total_drops,
+                ROUND(AVG(mos), 2) AS qualidade_audio_mos
+            FROM iceberg.silver.call_tests
+            WHERE CAST(date_of_test AS DATE) = DATE '{snapshot_date_sql}'
+            GROUP BY phone_number
+        ) ac ON cdr.phone_number = ac.phone_number
+        LEFT JOIN (
+            SELECT
+                phone_number,
+                COALESCE(bool_or(longitude > -8.80), FALSE) AS storm_affected
+            FROM iceberg.silver.network_logs
+            WHERE CAST(timestamp_log AS DATE) = DATE '{snapshot_date_sql}'
+            GROUP BY phone_number
+        ) al ON cdr.phone_number = al.phone_number
+    """
+
+
 @task(container_image=gold_image, environment=TASK_ENV)
-def build_gold_churn_risk(target_date_str: str) -> str:
+def build_gold_churn_risk() -> str:
     """
-    Constrói o Produto B (Risco de Churn Diário) na camada Gold.
-    Cruza dados de faturação (CDR) com testes de rede e logs de localização.
+    Gold Produto B: uma linha por cliente por dia, para cada data em call_tests ou network_logs.
+    Inserções **por dia** para ficar abaixo do limite de memória do Trino (sem CROSS JOIN global).
     """
-    logger.info(f"🚀 A iniciar processamento Gold: Produto B para {target_date_str}")
-    
+    logger.info("Gold churn_risk_daily: full batch from silver (chunked by snapshot_date)")
+
     conn = trino.dbapi.connect(
-        host='host.docker.internal', 
-        port=8080, 
-        user='flyte', 
-        catalog='iceberg'
+        host="host.docker.internal",
+        port=8080,
+        user="flyte",
+        catalog="iceberg",
     )
     cur = conn.cursor()
-    
+
     try:
-        # 1. Garantir que o Schema Gold existe
-        cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.gold")
+        logger.info("Truncating gold.churn_risk_daily for full rebuild")
+        cur.execute("TRUNCATE TABLE iceberg.gold.churn_risk_daily")
         cur.fetchall()
 
-        # 2. Criar a tabela Gold de Churn (se não existir)
-        # Granularidade: 1 linha por Cliente por Dia
-        logger.info("⏳ A garantir que a tabela gold.churn_risk_daily existe...")
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS iceberg.gold.churn_risk_daily (
-                snapshot_date DATE,
-                phone_number VARCHAR,
-                storm_affected BOOLEAN,
-                receita_em_risco DOUBLE,
-                account_length INTEGER,
-                total_chamadas_suporte INTEGER,
-                total_drops BIGINT,
-                qualidade_audio_mos DOUBLE,
-                churn BOOLEAN
-            ) WITH (
-                format = 'PARQUET',
-                partitioning = ARRAY['day(snapshot_date)']
-            )
-        """)
-        cur.fetchall()
+        cur.execute(_snapshot_dates_sql())
+        raw_dates = [row[0] for row in cur.fetchall()]
 
-        # 3. IDEMPOTÊNCIA: Limpar snapshots antigos da mesma data
-        logger.info(f"🧹 A limpar snapshots antigos de {target_date_str} na Gold...")
-        cur.execute(f"DELETE FROM iceberg.gold.churn_risk_daily WHERE snapshot_date = DATE '{target_date_str}'")
-        cur.fetchall()
+        def _fmt(d) -> str:
+            if hasattr(d, "isoformat"):
+                return d.isoformat()
+            return str(d)[:10]
 
-        # 4. PROCESSAMENTO CUSTOMER 360
-        # Cruzamos CDR (Base) com Call Tests (Técnico) e Logs (Geográfico)
-        logger.info("⚙️ A calcular métricas de retenção via Trino Engine...")
-        
-        insert_query = f"""
-            INSERT INTO iceberg.gold.churn_risk_daily
-            SELECT 
-                DATE '{target_date_str}' AS snapshot_date,
-                cdr.phone_number,
-                
-                -- Verificamos se o cliente teve logs na zona Leste (exemplo da tempestade)
-                COALESCE(bool_or(nl.longitude > -8.80), FALSE) AS storm_affected,
-                
-                -- Soma das taxas (Day + Eve + Night + Intl Charge)
-                (cdr.day_charge + cdr.eve_charge + cdr.night_charge + cdr.intl_charge) AS receita_em_risco,
-                
-                cdr.account_length,
-                cdr.custserv_calls AS total_chamadas_suporte,
-                
-                -- Contagem de chamadas que caíram (DROP) no dia alvo
-                COUNT_IF(ct.call_test_result = 'DROP') AS total_drops,
-                
-                -- Média de qualidade percetível (MOS)
-                ROUND(AVG(ct.mos), 2) AS qualidade_audio_mos,
-                
-                cdr.churn
-                
-            FROM iceberg.silver.cdr_customers cdr
-            
-            -- Join com Testes de Chamada (mesmo dia)
-            LEFT JOIN iceberg.silver.call_tests ct 
-                ON cdr.phone_number = ct.phone_number 
-                AND CAST(ct.date_of_test AS DATE) = DATE '{target_date_str}'
-                
-            -- Join com Logs de Rede (mesmo dia) para verificar localização
-            LEFT JOIN iceberg.silver.network_logs nl 
-                ON cdr.phone_number = nl.phone_number 
-                AND CAST(nl.timestamp_log AS DATE) = DATE '{target_date_str}'
-                
-            GROUP BY 
-                cdr.phone_number, 
-                cdr.account_length, 
-                cdr.day_charge, cdr.eve_charge, cdr.night_charge, cdr.intl_charge,
-                cdr.custserv_calls, 
-                cdr.churn
-        """
-        cur.execute(insert_query)
-        cur.fetchall()
+        dates = [_fmt(d) for d in raw_dates]
+        logger.info("Churn gold: %s distinct snapshot date(s) to load", len(dates))
 
-        logger.info(f"✅ Sucesso! Produto Gold 'Churn Risk' atualizado para {target_date_str}")
-        return f"Gold churn_risk_daily updated for {target_date_str}"
+        for snapshot_date_sql in dates:
+            logger.info("Churn gold INSERT snapshot_date=%s", snapshot_date_sql)
+            cur.execute(_insert_one_snapshot_date(snapshot_date_sql=snapshot_date_sql))
+            cur.fetchall()
+
+        logger.info("Gold churn_risk_daily full batch completed (%s day chunk(s))", len(dates))
+        return f"Gold churn_risk_daily rebuilt: {len(dates)} snapshot day(s)"
 
     except Exception as e:
-        logger.error(f"❌ Falha na construção do Produto B: {str(e)}")
-        raise Exception(f"Churn Gold Task Failed: {str(e)}")
+        logger.error("Churn gold task failed: %s", str(e))
+        raise Exception(f"Churn Gold Task Failed: {str(e)}") from e
     finally:
         conn.close()

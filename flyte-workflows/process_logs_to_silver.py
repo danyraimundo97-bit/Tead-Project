@@ -47,10 +47,10 @@ _RAW_INSERT_NAMES = (
 
 
 @task(container_image=medallion_image, environment=TASK_ENV)
-def process_logs_to_silver(target_date_str: str) -> str:
-    """Cleans Network Logs, applies GPS offset, and uploads partitioned by Day."""
+def process_logs_to_silver() -> str:
+    """Cleans network logs and loads the full bronze batch into silver (replace)."""
     try:
-        logger.info("Starting network logs bronze -> silver for date=%s", target_date_str)
+        logger.info("Starting network logs bronze -> silver (full batch)")
         s3 = minio_s3_client()
 
         logger.info("Downloading bronze/network_logs.csv from MinIO")
@@ -185,20 +185,17 @@ def process_logs_to_silver(target_date_str: str) -> str:
         df = transform_network_logs_silver_features(df)
 
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        daily_df = df[df["timestamp"].dt.strftime("%Y-%m-%d") == target_date_str].copy()
+        df = df.dropna(subset=["timestamp"])
+        if df.empty:
+            logger.warning("No network logs with valid timestamps; skipping silver load")
+            return "No Network Logs with valid timestamps. Skipping."
 
-        if daily_df.empty:
-            logger.warning("No network logs for date=%s; skipping", target_date_str)
-            return f"No Network Logs found for {target_date_str}. Skipping."
+        logger.info("Prepared %s network log rows for full silver load", len(df))
 
-        logger.info(
-            "Filtered network logs to %s rows for date=%s", len(daily_df), target_date_str
-        )
+        df.rename(columns={"timestamp": "timestamp_log"}, inplace=True)
 
-        daily_df.rename(columns={"timestamp": "timestamp_log"}, inplace=True)
-
-        staging_key = f"staging/network_logs/day={target_date_str}/data.parquet"
-        daily_df.to_parquet("/tmp/clean_logs.parquet", engine="pyarrow", index=False)
+        staging_key = "staging/network_logs/batch/data.parquet"
+        df.to_parquet("/tmp/clean_logs.parquet", engine="pyarrow", index=False)
         s3.upload_file("/tmp/clean_logs.parquet", "warehouse", staging_key)
         logger.info("Uploaded staging %s; loading Trino silver.network_logs", staging_key)
 
@@ -207,13 +204,11 @@ def process_logs_to_silver(target_date_str: str) -> str:
         )
         cur = conn.cursor()
 
-        safe_date = target_date_str.replace("-", "")
-
         temp_location = staging_key.replace("/data.parquet", "")
 
         cur.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS hive.staging.temp_logs_{safe_date} (
+            CREATE TABLE IF NOT EXISTS hive.staging.temp_logs_batch (
                 timestamp_log TIMESTAMP(3), devicemake VARCHAR, devicemodel VARCHAR,
                 network_provider VARCHAR,
                 nt_ohe_lte BOOLEAN, nt_ohe_gsm BOOLEAN, nt_ohe_umts BOOLEAN,
@@ -226,16 +221,12 @@ def process_logs_to_silver(target_date_str: str) -> str:
         )
         cur.fetchall()
 
-        logger.info(
-            "🧹 Limpar dados antigos do dia %s para evitar duplicados...", target_date_str
-        )
-        cur.execute(
-            f"DELETE FROM iceberg.silver.network_logs WHERE CAST(timestamp_log AS DATE) = DATE '{target_date_str}'"
-        )
+        logger.info("Replacing iceberg.silver.network_logs with full batch")
+        cur.execute("TRUNCATE TABLE iceberg.silver.network_logs")
         cur.fetchall()
 
         cur.execute(
-            f"""
+            """
             INSERT INTO iceberg.silver.network_logs (
                 silver_row_id, timestamp_log, devicemake, devicemodel, network_provider,
                 nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
@@ -243,22 +234,21 @@ def process_logs_to_silver(target_date_str: str) -> str:
                 latitude, longitude, phone_number
             )
             SELECT
-                (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.network_logs)
-                    + ROW_NUMBER() OVER (ORDER BY timestamp_log, phone_number),
+                ROW_NUMBER() OVER (ORDER BY timestamp_log, phone_number),
                 timestamp_log, devicemake, devicemodel, network_provider,
                 nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
                 rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
                 latitude, longitude, phone_number
-            FROM hive.staging.temp_logs_{safe_date}
+            FROM hive.staging.temp_logs_batch
         """
         )
         cur.fetchall()
 
-        cur.execute(f"DROP TABLE hive.staging.temp_logs_{safe_date}")
+        cur.execute("DROP TABLE hive.staging.temp_logs_batch")
         cur.fetchall()
 
-        logger.info("Network logs silver load finished for date=%s", target_date_str)
-        return f"Successfully loaded Network Logs for {target_date_str}!"
+        logger.info("Network logs silver load finished (full batch, %s rows)", len(df))
+        return f"Successfully loaded {len(df)} Network Log rows (full batch)!"
 
     except Exception as e:
         logger.error(f"❌ TASK FAILED: {str(e)}")
