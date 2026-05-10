@@ -308,18 +308,18 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS iceberg.gold.churn_risk_daily (
-            snapshot_date DATE,
-            phone_number VARCHAR,
-            storm_affected BOOLEAN,
-            receita_em_risco DOUBLE,
-            account_length INTEGER,
-            total_chamadas_suporte INTEGER,
-            total_drops BIGINT,
-            qualidade_audio_mos DOUBLE,
-            churn BOOLEAN
+            gold_row_id BIGINT NOT NULL,
+            "Data_Referencia" DATE,
+            "Telefone" VARCHAR,
+            "Afetado_Tempestade" BOOLEAN,
+            "Receita_Em_Risco" DOUBLE,
+            "Tempo_Subscrito" INTEGER,
+            "Total_Chamadas_Suporte" INTEGER,
+            "Total_Drops" BIGINT,
+            "Qualidade_Audio_MOS" DOUBLE,
+            "Desistencia" BOOLEAN
         ) WITH (
-            format = 'PARQUET',
-            partitioning = ARRAY['day(snapshot_date)']
+            format = 'PARQUET'
         )
         """
     )
@@ -328,20 +328,24 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS iceberg.gold.network_quality_daily (
-            date_of_test DATE,
-            zona_leiria VARCHAR,
-            radio VARCHAR,
-            cell INTEGER,
-            network_provider VARCHAR,
-            avg_rsrp DOUBLE,
-            avg_rsrq DOUBLE,
-            avg_sinr DOUBLE,
-            avg_downlink_mbps DOUBLE,
-            poor_signal_connections BIGINT,
-            total_connections BIGINT
+            gold_row_id BIGINT NOT NULL,
+            "Data_Hora" TIMESTAMP(3),
+            "Zona_Leiria" VARCHAR,
+            "Latitude_Ocorrencia" DOUBLE,
+            "Longitude_Ocorrencia" DOUBLE,
+            "ID_Antena_Conectada" BIGINT,
+            "Estado_Antena" BOOLEAN,
+            "Distancia_Antena_m" DOUBLE,
+            "Tecnologia_Rede" VARCHAR,
+            "Potencia_RSRP" DOUBLE,
+            "Qualidade_RSRQ" DOUBLE,
+            "Ruido_SINR" DOUBLE,
+            "Velocidade_Downlink" DOUBLE,
+            "Telefones_Sucesso" BIGINT,
+            "Telefones_Falha" BIGINT,
+            "Telefones_Sem_Teste" BIGINT
         ) WITH (
-            format = 'PARQUET',
-            partitioning = ARRAY['day(date_of_test)']
+            format = 'PARQUET'
         )
         """
     )
@@ -393,16 +397,20 @@ def ensure_gold_layer_environment() -> str:
     try:
         cur.execute("SELECT 1")
         cur.fetchall()
-        assert_silver_tables_exist(cur, detail="Ambiente gold:")
+        assert_silver_tables_exist(cur, detail="Gold env:")
         ensure_gold_schemas_and_iceberg_tables(cur)
-        assert_gold_tables_exist(cur, detail="Pós-DDL gold:")
+        assert_gold_tables_exist(cur, detail="Gold env post-DDL:")
+    except Exception as e:
+        # Trino/driver errors sometimes carry types that break Flyte protobuf error serialization.
+        logger.exception("ensure_gold_layer_environment failed")
+        raise RuntimeError(str(e)) from None
     finally:
         conn.close()
 
     msg = (
-        "Gold garantido: iceberg.gold em s3a://warehouse/gold/ com "
-        f"{len(REQUIRED_GOLD_TABLES)} tabela(s) ({', '.join(sorted(REQUIRED_GOLD_TABLES))}); "
-        f"iceberg.silver OK ({', '.join(sorted(REQUIRED_SILVER_TABLES))})."
+        "Gold OK: iceberg.gold at s3a://warehouse/gold/ with "
+        f"{len(REQUIRED_GOLD_TABLES)} table(s); "
+        f"iceberg.silver OK."
     )
     logger.info(msg)
     return msg
