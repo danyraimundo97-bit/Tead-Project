@@ -6,6 +6,7 @@ from flytekit import task, ImageSpec
 from flyte_task_env import TASK_ENV, minio_s3_client
 from loki_logging import get_logger
 from silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
+from silver_transforms import transform_towers_silver_features
 
 logger = get_logger(__name__)
 
@@ -148,6 +149,8 @@ def process_towers_to_silver() -> str:
                 conn_q.close()
             df.drop(index=q_idx, inplace=True)
 
+        df = transform_towers_silver_features(df)
+
         final_count = len(df)
 
         logger.info("📍 Preparing %s daily tower snapshots for Silver Layer", final_count)
@@ -164,10 +167,12 @@ def process_towers_to_silver() -> str:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS hive.staging.temp_towers (
-                radio VARCHAR, mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER,
+                mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER,
                 unit BIGINT, lon DOUBLE, lat DOUBLE, range_m INTEGER, samples INTEGER,
                 changeable INTEGER, created VARCHAR, updated VARCHAR, average_signal DOUBLE,
-                snapshot_date VARCHAR, status VARCHAR
+                snapshot_date VARCHAR, status BOOLEAN,
+                radio_ohe_gsm BOOLEAN, radio_ohe_umts BOOLEAN, radio_ohe_lte BOOLEAN,
+                radio_ohe_nr BOOLEAN, radio_ohe_cdma BOOLEAN, radio_ohe_other BOOLEAN
             ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/staging/towers/')
         """
         )
@@ -179,14 +184,18 @@ def process_towers_to_silver() -> str:
         cur.execute(
             """
             INSERT INTO iceberg.silver.towers (
-                silver_row_id, radio, mcc, net, area, cell, unit, lon, lat, range_m, samples,
-                changeable, created, updated, average_signal, snapshot_date, status
+                silver_row_id, mcc, net, area, cell, unit, lon, lat, range_m, samples,
+                changeable, created, updated, average_signal, snapshot_date, status,
+                radio_ohe_gsm, radio_ohe_umts, radio_ohe_lte, radio_ohe_nr,
+                radio_ohe_cdma, radio_ohe_other
             )
             SELECT
                 (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.towers)
-                    + ROW_NUMBER() OVER (ORDER BY radio, mcc, net, area, cell),
-                radio, mcc, net, area, cell, unit, lon, lat, range_m, samples,
-                changeable, created, updated, average_signal, snapshot_date, status
+                    + ROW_NUMBER() OVER (ORDER BY mcc, net, area, cell, unit),
+                mcc, net, area, cell, unit, lon, lat, range_m, samples,
+                changeable, created, updated, average_signal, snapshot_date, status,
+                radio_ohe_gsm, radio_ohe_umts, radio_ohe_lte, radio_ohe_nr,
+                radio_ohe_cdma, radio_ohe_other
             FROM hive.staging.temp_towers
             """
         )

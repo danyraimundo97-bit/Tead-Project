@@ -6,6 +6,7 @@ from flytekit import task, ImageSpec
 from flyte_task_env import TASK_ENV, minio_s3_client
 from loki_logging import get_logger
 from silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
+from silver_transforms import transform_call_tests_silver_features
 
 logger = get_logger(__name__)
 
@@ -166,6 +167,8 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
                 conn_q.close()
             df.drop(index=q_idx, inplace=True)
 
+        df = transform_call_tests_silver_features(df)
+
         daily_df = df[df["date_of_test"].dt.strftime("%Y-%m-%d") == target_date_str].copy()
 
         if daily_df.empty:
@@ -188,8 +191,10 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
             f"""
             CREATE TABLE IF NOT EXISTS hive.staging.temp_tests_{safe_date} (
                 date_of_test TIMESTAMP(3), signal_dbm DOUBLE, speed_m_s DOUBLE,
-                distance_from_site_m DOUBLE, call_test_duration_s DOUBLE, call_test_result VARCHAR,
-                call_test_technology VARCHAR, call_test_setup_time_s DOUBLE, mos DOUBLE, phone_number VARCHAR
+                distance_from_site_m DOUBLE, duration_s DOUBLE, setup_time_s DOUBLE,
+                result BOOLEAN, mos DOUBLE, phone_number VARCHAR,
+                tech_ohe_gsm BOOLEAN, tech_ohe_umts BOOLEAN, tech_ohe_lte BOOLEAN,
+                tech_ohe_volte BOOLEAN, tech_ohe_nr BOOLEAN, tech_ohe_other BOOLEAN
             ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/{temp_location}/')
         """
         )
@@ -205,15 +210,17 @@ def process_call_tests_to_silver(target_date_str: str) -> str:
             f"""
             INSERT INTO iceberg.silver.call_tests (
                 silver_row_id, date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
-                call_test_duration_s, call_test_result, call_test_technology,
-                call_test_setup_time_s, mos, phone_number
+                duration_s, setup_time_s, result, mos, phone_number,
+                tech_ohe_gsm, tech_ohe_umts, tech_ohe_lte, tech_ohe_volte,
+                tech_ohe_nr, tech_ohe_other
             )
             SELECT
                 (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.call_tests)
                     + ROW_NUMBER() OVER (ORDER BY date_of_test, phone_number),
                 date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
-                call_test_duration_s, call_test_result, call_test_technology,
-                call_test_setup_time_s, mos, phone_number
+                duration_s, setup_time_s, result, mos, phone_number,
+                tech_ohe_gsm, tech_ohe_umts, tech_ohe_lte, tech_ohe_volte,
+                tech_ohe_nr, tech_ohe_other
             FROM hive.staging.temp_tests_{safe_date}
         """
         )

@@ -57,7 +57,7 @@ def avaliar_silver():
         df_call.columns = df_call.columns.str.lower()
         df_towers.columns = df_towers.columns.str.lower()
 
-        # 1. Verificar Parsing de Rádio (Logs) — iceberg.silver.network_logs
+        # 1. Network logs — numéricos + one-hot network_type (nt_ohe_*)
         logger.info("\n[1] NETWORK LOGS (Limpeza de Unidades):")
         rsrp_type = df_logs["rsrp"].dtype
         vel_type = df_logs["velocity_kmh"].dtype
@@ -66,6 +66,9 @@ def avaliar_silver():
 
         nulos_geo = df_logs["latitude"].isnull().sum()
         logger.info(f" -> Linhas sem coordenadas removidas? (Nulos em latitude = {nulos_geo})")
+        if "nt_ohe_lte" in df_logs.columns:
+            ohe_sum = int(df_logs["nt_ohe_lte"].fillna(False).astype(bool).sum())
+            logger.info(f" -> One-hot nt_ohe_lte verdadeiros (amostra): {ohe_sum}")
 
         # 2. Verificar Deduplicação (CDR)
         logger.info("\n[2] CDR (Deduplicação):")
@@ -73,16 +76,20 @@ def avaliar_silver():
         logger.info(f" -> Limpeza bem sucedida? Existem {duplicados} linhas duplicadas no ficheiro.")
         logger.info(f" -> Total de clientes únicos faturados: {len(df_cdr)}")
 
-        # 3. Verificar Formatação de Decimais (Call Tests) — iceberg.silver.call_tests
-        logger.info("\n[3] CALL TESTS (Formatação Americana):")
+        # 3. Call tests — result boolean, duration_s / setup_time_s, tech_ohe_*
+        logger.info("\n[3] CALL TESTS (Formatação + features silver):")
         mos_type = df_call["mos"].dtype
-        dur_type = df_call["call_test_duration_s"].dtype
+        dur_type = df_call["duration_s"].dtype
+        res_type = df_call["result"].dtype
         logger.info(f" -> MOS convertido para Float? Tipo atual: {mos_type}")
-        logger.info(f" -> Duração convertida para Float? Tipo atual: {dur_type}")
-        
-        # 4. Verificação Geral de Snapshots (Towers)
+        logger.info(f" -> Duração (duration_s) Float? Tipo atual: {dur_type}")
+        logger.info(f" -> result boolean? Tipo atual: {res_type}")
+
+        # 4. Towers — status boolean, radio one-hot (radio_ohe_*)
         logger.info("\n[4] TORRES (Estrutura final):")
         logger.info(f" -> Total de registos integrados na camada Silver: {len(df_towers)}")
+        if "status" in df_towers.columns:
+            logger.info(f" -> status tipo: {df_towers['status'].dtype}")
 
         return f"Successfully validated Silver layer!"
 

@@ -85,8 +85,10 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
         CREATE TABLE IF NOT EXISTS iceberg.silver.network_logs (
             silver_row_id BIGINT NOT NULL,
             timestamp_log TIMESTAMP(3), devicemake VARCHAR, devicemodel VARCHAR,
-            network_provider VARCHAR, network_type VARCHAR, rsrp DOUBLE,
-            rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
+            network_provider VARCHAR,
+            nt_ohe_lte BOOLEAN, nt_ohe_gsm BOOLEAN, nt_ohe_umts BOOLEAN,
+            nt_ohe_nr BOOLEAN, nt_ohe_cdma BOOLEAN, nt_ohe_other BOOLEAN,
+            rsrp DOUBLE, rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
             uplink_mbps DOUBLE, velocity_kmh DOUBLE, latitude DOUBLE,
             longitude DOUBLE, phone_number VARCHAR
         )
@@ -246,8 +248,10 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
         CREATE TABLE IF NOT EXISTS iceberg.silver.call_tests (
             silver_row_id BIGINT NOT NULL,
             date_of_test TIMESTAMP(3), signal_dbm DOUBLE, speed_m_s DOUBLE,
-            distance_from_site_m DOUBLE, call_test_duration_s DOUBLE, call_test_result VARCHAR,
-            call_test_technology VARCHAR, call_test_setup_time_s DOUBLE, mos DOUBLE, phone_number VARCHAR
+            distance_from_site_m DOUBLE, duration_s DOUBLE, setup_time_s DOUBLE,
+            result BOOLEAN, mos DOUBLE, phone_number VARCHAR,
+            tech_ohe_gsm BOOLEAN, tech_ohe_umts BOOLEAN, tech_ohe_lte BOOLEAN,
+            tech_ohe_volte BOOLEAN, tech_ohe_nr BOOLEAN, tech_ohe_other BOOLEAN
         )
         """
     )
@@ -257,10 +261,12 @@ def ensure_silver_schemas_and_iceberg_tables(cur) -> None:
         """
         CREATE TABLE IF NOT EXISTS iceberg.silver.towers (
             silver_row_id BIGINT NOT NULL,
-            radio VARCHAR, mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER,
+            mcc INTEGER, net INTEGER, area INTEGER, cell INTEGER,
             unit BIGINT, lon DOUBLE, lat DOUBLE, range_m INTEGER, samples INTEGER,
             changeable INTEGER, created VARCHAR, updated VARCHAR, average_signal DOUBLE,
-            snapshot_date VARCHAR, status VARCHAR
+            snapshot_date VARCHAR, status BOOLEAN,
+            radio_ohe_gsm BOOLEAN, radio_ohe_umts BOOLEAN, radio_ohe_lte BOOLEAN,
+            radio_ohe_nr BOOLEAN, radio_ohe_cdma BOOLEAN, radio_ohe_other BOOLEAN
         )
         """
     )

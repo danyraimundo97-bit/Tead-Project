@@ -6,6 +6,7 @@ from flytekit import task, ImageSpec
 from flyte_task_env import TASK_ENV, minio_s3_client
 from loki_logging import get_logger
 from silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
+from silver_transforms import transform_network_logs_silver_features
 
 logger = get_logger(__name__)
 
@@ -181,6 +182,8 @@ def process_logs_to_silver(target_date_str: str) -> str:
             len(df),
         )
 
+        df = transform_network_logs_silver_features(df)
+
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         daily_df = df[df["timestamp"].dt.strftime("%Y-%m-%d") == target_date_str].copy()
 
@@ -212,8 +215,10 @@ def process_logs_to_silver(target_date_str: str) -> str:
             f"""
             CREATE TABLE IF NOT EXISTS hive.staging.temp_logs_{safe_date} (
                 timestamp_log TIMESTAMP(3), devicemake VARCHAR, devicemodel VARCHAR,
-                network_provider VARCHAR, network_type VARCHAR, rsrp DOUBLE,
-                rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
+                network_provider VARCHAR,
+                nt_ohe_lte BOOLEAN, nt_ohe_gsm BOOLEAN, nt_ohe_umts BOOLEAN,
+                nt_ohe_nr BOOLEAN, nt_ohe_cdma BOOLEAN, nt_ohe_other BOOLEAN,
+                rsrp DOUBLE, rsrq DOUBLE, sinr DOUBLE, pci DOUBLE, downlink_mbps DOUBLE,
                 uplink_mbps DOUBLE, velocity_kmh DOUBLE, latitude DOUBLE,
                 longitude DOUBLE, phone_number VARCHAR
             ) WITH (format = 'PARQUET', external_location = 's3a://warehouse/{temp_location}/')
@@ -233,13 +238,15 @@ def process_logs_to_silver(target_date_str: str) -> str:
             f"""
             INSERT INTO iceberg.silver.network_logs (
                 silver_row_id, timestamp_log, devicemake, devicemodel, network_provider,
-                network_type, rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
+                nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
+                rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
                 latitude, longitude, phone_number
             )
             SELECT
                 (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.network_logs)
                     + ROW_NUMBER() OVER (ORDER BY timestamp_log, phone_number),
-                timestamp_log, devicemake, devicemodel, network_provider, network_type,
+                timestamp_log, devicemake, devicemodel, network_provider,
+                nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
                 rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
                 latitude, longitude, phone_number
             FROM hive.staging.temp_logs_{safe_date}

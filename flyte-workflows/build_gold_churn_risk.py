@@ -43,7 +43,7 @@ def build_gold_churn_risk() -> str:
                 CAST(date_of_test AS DATE) AS data_evento,
                 phone_number,
                 AVG(mos) AS avg_daily_mos,
-                COUNT(CASE WHEN call_test_result = 'DROP' THEN 1 END) AS total_drops
+                COUNT_IF(result = FALSE) AS total_drops
             FROM iceberg.silver.call_tests
             GROUP BY CAST(date_of_test AS DATE), phone_number
         ),
