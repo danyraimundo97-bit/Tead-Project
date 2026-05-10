@@ -10,6 +10,7 @@ from ensure_pipeline_layers import (
     ensure_gold_layer_environment,
     ensure_silver_layer_environment,
 )
+from build_gold_network_quality import build_gold_network_quality
 
 
 @workflow
@@ -31,6 +32,7 @@ def jdpt_lakehouse_pipeline(target_date_str: str) -> str:
 
     # 5) Silver → gold
     gold_churn_risk = build_gold_churn_risk()
+    gold_network_quality = build_gold_network_quality()
 
     silver_env >> silver_cdr
     silver_env >> silver_logs
@@ -44,5 +46,6 @@ def jdpt_lakehouse_pipeline(target_date_str: str) -> str:
 
     silver_checks >> gold_env
     gold_env >> gold_churn_risk
+    gold_env >> gold_network_quality
 
     return f"Lakehouse successfully updated for {target_date_str}!"
