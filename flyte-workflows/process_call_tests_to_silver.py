@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import trino
@@ -16,7 +17,7 @@ medallion_image = ImageSpec(
     registry="localhost:30000",
 )
 
-SOURCE_FILE_KEY = "bronze/call_tests.csv"
+SOURCE_FILE_KEY = "bronze/call_tests/"
 
 CALL_TESTS_BRONZE_COL_ORDER = [
     "date_of_test",
@@ -53,10 +54,21 @@ def process_call_tests_to_silver() -> str:
         logger.info("🟢 Starting call tests bronze -> silver (full batch)")
         s3 = minio_s3_client()
 
-        logger.info("⏳ Downloading bronze/call_tests.csv from MinIO...")
-        s3.download_file("warehouse", SOURCE_FILE_KEY, "/tmp/raw_tests.csv")
+        logger.info("⏳ A transferir ficheiros particionados de %s...", SOURCE_FILE_KEY)
+        paginator = s3.get_paginator('list_objects_v2')
+        dfs = []
+        for page in paginator.paginate(Bucket="warehouse", Prefix=SOURCE_FILE_KEY):
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith(".csv"):
+                    resp = s3.get_object(Bucket="warehouse", Key=obj["Key"])
+                    # ATENÇÃO ao decimal="," exigido nos Call Tests!
+                    dfs.append(pd.read_csv(resp["Body"], sep=";", decimal=","))
+        
+        if not dfs:
+            raise ValueError(f"❌ Nenhum dado particionado encontrado em {SOURCE_FILE_KEY}")
+            
+        df = pd.concat(dfs, ignore_index=True)
 
-        df = pd.read_csv("/tmp/raw_tests.csv", sep=";", decimal=",")
         lines = pd.Series(np.arange(2, len(df) + 2, dtype=np.int64), index=df.index)
 
         df.columns = (
@@ -176,9 +188,12 @@ def process_call_tests_to_silver() -> str:
 
         logger.info("Prepared %s call test rows for full silver load", len(df))
 
+        # Cria a pasta 'temp' se não existir
+        os.makedirs("temp", exist_ok=True)
+        # Salva o DataFrame limpo como Parquet e faz upload para o staging
         staging_key = "staging/call_tests/batch/data.parquet"
-        df.to_parquet("/tmp/clean_tests.parquet", engine="pyarrow", index=False)
-        s3.upload_file("/tmp/clean_tests.parquet", "warehouse", staging_key)
+        df.to_parquet("temp/clean_tests.parquet", engine="pyarrow", index=False)
+        s3.upload_file("temp/clean_tests.parquet", "warehouse", staging_key)
 
         conn = trino.dbapi.connect(
             host="host.docker.internal", port=8080, user="flyte", catalog="iceberg"

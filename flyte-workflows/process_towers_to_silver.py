@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import trino
@@ -16,7 +17,7 @@ medallion_image = ImageSpec(
     registry="localhost:30000",
 )
 
-SOURCE_FILE_KEY = "bronze/towers.csv"
+SOURCE_FILE_KEY = "bronze/towers/"
 
 TOWERS_BRONZE_COL_ORDER = [
     "radio",
@@ -63,10 +64,21 @@ def process_towers_to_silver() -> str:
         logger.info("🟢 Starting towers bronze -> silver")
         s3 = minio_s3_client()
 
-        logger.info("⏳ Downloading bronze/towers.csv from MinIO...")
-        s3.download_file("warehouse", SOURCE_FILE_KEY, "/tmp/raw_towers.csv")
+        logger.info("⏳ A transferir ficheiros particionados de %s...", SOURCE_FILE_KEY)
+        paginator = s3.get_paginator('list_objects_v2')
+        dfs = []
+        for page in paginator.paginate(Bucket="warehouse", Prefix=SOURCE_FILE_KEY):
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith(".csv"):
+                    resp = s3.get_object(Bucket="warehouse", Key=obj["Key"])
+                    # As torres usam vírgula como separador
+                    dfs.append(pd.read_csv(resp["Body"], sep=","))
+        
+        if not dfs:
+            raise ValueError(f"❌ Nenhum dado particionado encontrado em {SOURCE_FILE_KEY}")
+            
+        df = pd.concat(dfs, ignore_index=True)
 
-        df = pd.read_csv("/tmp/raw_towers.csv", sep=",")
         lines = pd.Series(np.arange(2, len(df) + 2, dtype=np.int64), index=df.index)
 
         df.rename(
@@ -155,8 +167,11 @@ def process_towers_to_silver() -> str:
 
         logger.info("📍 Preparing %s daily tower snapshots for Silver Layer", final_count)
 
-        df.to_parquet("/tmp/clean_towers.parquet", engine="pyarrow", index=False)
-        s3.upload_file("/tmp/clean_towers.parquet", "warehouse", "staging/towers/data.parquet")
+        # Cria a pasta 'temp' se não existir
+        os.makedirs("temp", exist_ok=True)
+        # Salva o DataFrame limpo como Parquet e faz upload para o staging
+        df.to_parquet("temp/clean_towers.parquet", engine="pyarrow", index=False)
+        s3.upload_file("temp/clean_towers.parquet", "warehouse", "staging/towers/data.parquet")
 
         logger.info("⏳ Loading into Iceberg via Trino...")
         conn = trino.dbapi.connect(

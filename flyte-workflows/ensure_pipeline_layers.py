@@ -21,11 +21,11 @@ REQUIRED_GOLD_TABLES = frozenset(
     {"churn_risk_daily", "network_quality_daily"}
 )
 
-BRONZE_OBJECT_KEYS = (
-    "bronze/cdr_customers.csv",
-    "bronze/network_logs.csv",
-    "bronze/call_tests.csv",
-    "bronze/towers.csv",
+BRONZE_PREFIXES = (
+    "bronze/cdr_customers/",
+    "bronze/network_logs/",
+    "bronze/call_tests/",
+    "bronze/towers/",
 )
 
 ensure_image = ImageSpec(
@@ -356,17 +356,13 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
 def ensure_silver_layer_environment() -> str:
     """Bronze no MinIO, Trino OK, schemas hive.staging / iceberg.silver e tabelas Iceberg silver."""
     s3 = minio_s3_client()
-    for key in BRONZE_OBJECT_KEYS:
-        try:
-            s3.head_object(Bucket=WAREHOUSE_BUCKET, Key=key)
-        except ClientError as e:
-            code = e.response.get("Error", {}).get("Code", "")
-            if code in ("404", "NoSuchKey", "NotFound"):
-                raise ValueError(
-                    f"Bronze em falta no MinIO: s3://{WAREHOUSE_BUCKET}/{key}"
-                ) from e
-            raise
-        logger.info("Bronze OK: s3://%s/%s", WAREHOUSE_BUCKET, key)
+    for prefix in BRONZE_PREFIXES:
+        resp = s3.list_objects_v2(Bucket=WAREHOUSE_BUCKET, Prefix=prefix, MaxKeys=1)
+        if 'Contents' not in resp:
+            raise ValueError(
+                f"Bronze particionado em falta no MinIO: s3://{WAREHOUSE_BUCKET}/{prefix}"
+            )
+        logger.info("Bronze particionado OK: s3://%s/%s", WAREHOUSE_BUCKET, prefix)
 
     conn = trino.dbapi.connect(
         host="host.docker.internal", port=8080, user="flyte", catalog="iceberg"

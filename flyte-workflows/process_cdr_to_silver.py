@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import trino
@@ -15,7 +16,7 @@ medallion_image = ImageSpec(
     registry="localhost:30000",
 )
 
-SOURCE_FILE_KEY = "bronze/cdr_customers.csv"
+SOURCE_FILE_KEY = "bronze/cdr_customers/"
 
 CDR_BRONZE_COL_ORDER = [
     "phone_number",
@@ -76,13 +77,23 @@ def _clean_churn_series(raw: pd.Series) -> tuple[pd.Series, pd.Series]:
 def process_cdr_to_silver() -> str:
     """Downloads Bronze CDR, deduplicates it, and uploads to Silver Iceberg."""
     try:
-        logger.info("Starting CDR bronze -> silver")
+        logger.info("🟢 Starting CDR bronze -> silver")
         s3 = minio_s3_client()
 
-        logger.info("Downloading bronze/cdr_customers.csv from MinIO")
-        s3.download_file("warehouse", SOURCE_FILE_KEY, "/tmp/raw_cdr.csv")
+        logger.info("⏳ A transferir ficheiros particionados de %s...", SOURCE_FILE_KEY)
+        paginator = s3.get_paginator('list_objects_v2')
+        dfs = []
+        for page in paginator.paginate(Bucket="warehouse", Prefix=SOURCE_FILE_KEY):
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith(".csv"):
+                    resp = s3.get_object(Bucket="warehouse", Key=obj["Key"])
+                    dfs.append(pd.read_csv(resp["Body"], sep=";"))
+        
+        if not dfs:
+            raise ValueError(f"❌ Nenhum dado particionado encontrado em {SOURCE_FILE_KEY}")
+            
+        df = pd.concat(dfs, ignore_index=True)
 
-        df = pd.read_csv("/tmp/raw_cdr.csv", sep=";")
         lines = pd.Series(np.arange(2, len(df) + 2, dtype=np.int64), index=df.index)
 
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.lower()
@@ -187,8 +198,11 @@ def process_cdr_to_silver() -> str:
             initial_rows - final_rows,
         )
 
-        df.to_parquet("/tmp/clean_cdr.parquet", engine="pyarrow", index=False)
-        s3.upload_file("/tmp/clean_cdr.parquet", "warehouse", "staging/cdr/data.parquet")
+        # Cria a pasta 'temp' se não existir
+        os.makedirs("temp", exist_ok=True)
+        # Salva o DataFrame limpo como Parquet e faz upload para o staging
+        df.to_parquet("temp/clean_cdr.parquet", engine="pyarrow", index=False)
+        s3.upload_file("temp/clean_cdr.parquet", "warehouse", "staging/cdr/data.parquet")
         logger.info("Uploaded staging parquet; loading Iceberg silver.cdr_customers (full replace)")
 
         conn = trino.dbapi.connect(

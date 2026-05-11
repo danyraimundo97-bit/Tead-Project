@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import trino
@@ -16,7 +17,7 @@ medallion_image = ImageSpec(
     registry="localhost:30000",
 )
 
-SOURCE_FILE_KEY = "bronze/network_logs.csv"
+SOURCE_FILE_KEY = "bronze/network_logs/"
 
 BRONZE_QUARANTINE_COLS = [
     "timestamp",
@@ -50,16 +51,30 @@ _RAW_INSERT_NAMES = (
 def process_logs_to_silver() -> str:
     """Cleans network logs and loads the full bronze batch into silver (replace)."""
     try:
-        logger.info("Starting network logs bronze -> silver (full batch)")
+        logger.info("🟢 Starting network logs bronze -> silver (full batch)")
         s3 = minio_s3_client()
 
-        logger.info("Downloading bronze/network_logs.csv from MinIO")
-        s3.download_file("warehouse", SOURCE_FILE_KEY, "/tmp/raw_logs.csv")
+        logger.info("⏳ A transferir ficheiros particionados de %s...", SOURCE_FILE_KEY)
+        paginator = s3.get_paginator('list_objects_v2')
+        dfs = []
+        for page in paginator.paginate(Bucket="warehouse", Prefix=SOURCE_FILE_KEY):
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith(".csv"):
+                    resp = s3.get_object(Bucket="warehouse", Key=obj["Key"])
+                    dfs.append(pd.read_csv(resp["Body"], sep=";"))
+        
+        if not dfs:
+            raise ValueError(f"❌ Nenhum dado particionado encontrado em {SOURCE_FILE_KEY}")
+            
+        df = pd.concat(dfs, ignore_index=True)
 
-        df = pd.read_csv("/tmp/raw_logs.csv", sep=";")
         lines = pd.Series(np.arange(2, len(df) + 2, dtype=np.int64), index=df.index)
 
         df.columns = df.columns.str.strip().str.lower()
+        
+        # Remover colunas duplicadas (mantendo a nossa injeção da tempestade que está no final)
+        df = df.loc[:, ~df.columns.duplicated(keep='last')]
+        
         bronze_only = df.copy()
 
         df.rename(
@@ -194,9 +209,12 @@ def process_logs_to_silver() -> str:
 
         df.rename(columns={"timestamp": "timestamp_log"}, inplace=True)
 
+        # Cria a pasta 'temp' se não existir
+        os.makedirs("temp", exist_ok=True)
+        # Salva o DataFrame limpo como Parquet e faz upload para o staging
         staging_key = "staging/network_logs/batch/data.parquet"
-        df.to_parquet("/tmp/clean_logs.parquet", engine="pyarrow", index=False)
-        s3.upload_file("/tmp/clean_logs.parquet", "warehouse", staging_key)
+        df.to_parquet("temp/clean_logs.parquet", engine="pyarrow", index=False)
+        s3.upload_file("temp/clean_logs.parquet", "warehouse", staging_key)
         logger.info("Uploaded staging %s; loading Trino silver.network_logs", staging_key)
 
         conn = trino.dbapi.connect(
