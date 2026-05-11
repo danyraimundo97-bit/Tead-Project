@@ -124,7 +124,8 @@ services:
 
   # --- Apache Superset (BI & Data Visualization) ---
   superset:
-    image: apache/superset:latest
+    build: 
+      context: ./superset
     user: root
     ports:
       - "8088:8088"
@@ -134,8 +135,6 @@ services:
       - SUPERSET_SECRET_KEY=uma_chave_secreta_super_segura_jdpt_2026
     command: >
       /bin/sh -c "
-      export PATH=/app/.venv/bin:$$PATH &&
-      pip install 'trino[sqlalchemy]' &&
       superset db upgrade &&
       superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@superset.com --password admin &&
       superset init &&
