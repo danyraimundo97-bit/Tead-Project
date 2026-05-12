@@ -163,88 +163,88 @@ def build_gold_network_quality() -> str:
                 FROM log_tower_dist
             ),
             closest_tower AS (
-                SELECT silver_row_id, tower_silver_row_id, dist_m
-                FROM dist_ranked
-                WHERE rn = 1
+                SELECT 
+                    dr.silver_row_id AS log_silver_row_id, 
+                    t.mcc, t.net, t.area, t.cell, t.unit,
+                    dr.dist_m
+                FROM dist_ranked dr
+                INNER JOIN towers_for_geo t ON dr.tower_silver_row_id = t.silver_row_id
+                WHERE dr.rn = 1
             ),
             enriched AS (
                 SELECT
-                    nl.timestamp_log,
                     nl.phone_number,
                     nl.rsrp,
                     nl.rsrq,
                     nl.sinr,
                     nl.downlink_mbps,
-                    ct.tower_silver_row_id,
+                    ct.mcc, ct.net, ct.area, ct.cell, ct.unit,
                     ct.dist_m,
                     CAST(nl.timestamp_log AS DATE) AS log_day
                 FROM iceberg.silver.network_logs nl
-                INNER JOIN closest_tower ct ON nl.silver_row_id = ct.silver_row_id
+                INNER JOIN closest_tower ct ON nl.silver_row_id = ct.log_silver_row_id
+            ),
+            -- A SOLUÇÃO: A nossa matriz mestra agora é a Silver Towers, que já tem 1 linha por dia!
+            daily_towers AS (
+                SELECT 
+                    *,
+                    CAST(snapshot_date AS DATE) AS log_day
+                FROM iceberg.silver.towers
+                WHERE lat IS NOT NULL AND lon IS NOT NULL
             )
             SELECT
-                ROW_NUMBER() OVER (ORDER BY e.log_day, e.tower_silver_row_id) AS gold_row_id,
-                CAST(e.log_day AS TIMESTAMP(3)) AS "Data_Hora",
+                ROW_NUMBER() OVER (ORDER BY dt.log_day, dt.silver_row_id) AS gold_row_id,
+                CAST(dt.log_day AS TIMESTAMP(3)) AS "Data_Hora",
                 CASE
-                    WHEN t.lat > 39.75 AND t.lon > -8.80 THEN 'Norte-Leste'
-                    WHEN t.lat > 39.75 THEN 'Norte-Oeste'
-                    WHEN t.lon > -8.80 THEN 'Sul-Leste'
+                    WHEN dt.lat > 39.75 AND dt.lon > -8.80 THEN 'Norte-Leste'
+                    WHEN dt.lat > 39.75 THEN 'Norte-Oeste'
+                    WHEN dt.lon > -8.80 THEN 'Sul-Leste'
                     ELSE 'Sul-Oeste'
                 END AS "Zona_Leiria",
-                t.lat AS "Latitude_Ocorrencia",
-                t.lon AS "Longitude_Ocorrencia",
-                t.lat AS "Torre_Latitude",
-                t.lon AS "Torre_Longitude",
-                CAST(t.cell AS BIGINT) AS "ID_Antena_Conectada",
-                t.status AS "Estado_Antena",
+                dt.lat AS "Latitude_Ocorrencia",
+                dt.lon AS "Longitude_Ocorrencia",
+                dt.lat AS "Torre_Latitude",
+                dt.lon AS "Torre_Longitude",
+                CAST(dt.cell AS BIGINT) AS "ID_Antena_Conectada",
+                -- O status agora vem diretamente do snapshot do dia, permitindo ver a torre cair!
+                dt.status AS "Estado_Antena",
                 ROUND(AVG(e.dist_m), 2) AS "Distancia_Antena_m",
                 CASE
-                    WHEN t.radio_ohe_lte THEN 'LTE'
-                    WHEN t.radio_ohe_gsm THEN 'GSM'
-                    WHEN t.radio_ohe_umts THEN 'UMTS'
-                    WHEN t.radio_ohe_nr THEN 'NR'
-                    WHEN t.radio_ohe_cdma THEN 'CDMA'
+                    WHEN dt.radio_ohe_lte THEN 'LTE'
+                    WHEN dt.radio_ohe_gsm THEN 'GSM'
+                    WHEN dt.radio_ohe_umts THEN 'UMTS'
+                    WHEN dt.radio_ohe_nr THEN 'NR'
+                    WHEN dt.radio_ohe_cdma THEN 'CDMA'
                     ELSE 'OTHER'
                 END AS "Tecnologia_Rede",
-                ROUND(
-                    AVG(
-                        CASE
-                            WHEN e.rsrp BETWEEN -140 AND -44 THEN e.rsrp
-                        END
-                    ),
-                    2
-                ) AS "Potencia_RSRP",
-                ROUND(AVG(CASE WHEN e.rsrq BETWEEN -50 AND 30 THEN e.rsrq END), 2)
-                    AS "Qualidade_RSRQ",
-                ROUND(AVG(CASE WHEN e.sinr BETWEEN -30 AND 80 THEN e.sinr END), 2)
-                    AS "Ruido_SINR",
-                ROUND(
-                    AVG(CASE WHEN e.downlink_mbps BETWEEN 0 AND 5000 THEN e.downlink_mbps END),
-                    2
-                ) AS "Velocidade_Downlink",
-                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = TRUE THEN e.phone_number END) AS BIGINT)
-                    AS "Telefones_Sucesso",
-                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = FALSE THEN e.phone_number END) AS BIGINT)
-                    AS "Telefones_Falha",
-                CAST(COUNT(DISTINCT CASE WHEN tb.last_result IS NULL THEN e.phone_number END) AS BIGINT)
-                    AS "Telefones_Sem_Teste"
-            FROM enriched e
-            INNER JOIN towers_for_geo t ON t.silver_row_id = e.tower_silver_row_id
+                ROUND(AVG(CASE WHEN e.rsrp BETWEEN -140 AND -44 THEN e.rsrp END), 2) AS "Potencia_RSRP",
+                ROUND(AVG(CASE WHEN e.rsrq BETWEEN -50 AND 30 THEN e.rsrq END), 2) AS "Qualidade_RSRQ",
+                ROUND(AVG(CASE WHEN e.sinr BETWEEN -30 AND 80 THEN e.sinr END), 2) AS "Ruido_SINR",
+                ROUND(AVG(CASE WHEN e.downlink_mbps BETWEEN 0 AND 5000 THEN e.downlink_mbps END), 2) AS "Velocidade_Downlink",
+                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = TRUE THEN e.phone_number END) AS BIGINT) AS "Telefones_Sucesso",
+                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = FALSE THEN e.phone_number END) AS BIGINT) AS "Telefones_Falha",
+                CAST(COUNT(DISTINCT CASE WHEN tb.last_result IS NULL THEN e.phone_number END) AS BIGINT) AS "Telefones_Sem_Teste"
+            FROM daily_towers dt
+            -- O LEFT JOIN garante que as antenas vazias continuam no mapa com ZERO problemas
+            LEFT JOIN enriched e 
+                ON dt.mcc = e.mcc AND dt.net = e.net AND dt.area = e.area AND dt.cell = e.cell AND dt.unit = e.unit 
+                AND dt.log_day = e.log_day
             LEFT JOIN tests_by_day tb
                 ON e.phone_number = tb.phone_number
                 AND e.log_day = tb.d
             GROUP BY
-                e.log_day,
-                e.tower_silver_row_id,
-                t.cell,
-                t.status,
-                t.lat,
-                t.lon,
-                t.radio_ohe_lte,
-                t.radio_ohe_gsm,
-                t.radio_ohe_umts,
-                t.radio_ohe_nr,
-                t.radio_ohe_cdma,
-                t.radio_ohe_other
+                dt.log_day,
+                dt.silver_row_id,
+                dt.cell,
+                dt.status,
+                dt.lat,
+                dt.lon,
+                dt.radio_ohe_lte,
+                dt.radio_ohe_gsm,
+                dt.radio_ohe_umts,
+                dt.radio_ohe_nr,
+                dt.radio_ohe_cdma,
+                dt.radio_ohe_other
         """
         cur.execute(insert_query)
         cur.fetchall()

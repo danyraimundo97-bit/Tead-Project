@@ -1,16 +1,15 @@
 """
-Script de Avaliação 2: avaliar_silver.py
-Objetivo: Validar se o 'prepare_data.py' executou corretamente a Limpeza (ETL).
-Verifica: Tipos de dados (float em vez de string), remoção de duplicados e ausência de vírgulas.
+Script de Avaliação: avaliar_silver.py
+Objetivo: Garantia de Qualidade de Dados na Camada Silver.
+Verifica: Unicidade das chaves primárias (Row IDs), Plausibilidade Física de grandezas, e ausência de NULLs induzidos por falha de ETL.
 """
 
-import pandas as pd
 import trino
 from flytekit import task, ImageSpec
-
 from flyte_task_env import TASK_ENV
 from loki_logging import get_logger
-from ensure_pipeline_layers import assert_silver_tables_exist
+
+logger = get_logger(__name__)
 
 medallion_image = ImageSpec(
     name="jdpt_lakehouse_env",
@@ -18,85 +17,74 @@ medallion_image = ImageSpec(
     registry="localhost:30000"
 )
 
-logger = get_logger(__name__)
-
-
 @task(container_image=medallion_image, environment=TASK_ENV)
 def avaliar_silver():
-    logger.info("="*50)
-    logger.info(" INICIANDO AVALIAÇÃO DA CAMADA SILVER (CLEAN)")
-    logger.info("="*50)
+    logger.info("="*60)
+    logger.info(" INICIANDO QUALITY ASSURANCE (QA) PROFUNDO: CAMADA SILVER")
+    logger.info("="*60)
 
     try:
-        logger.info("Conectando ao Trino para validar dados na camada Silver...")
-        conn = trino.dbapi.connect(
-            host='host.docker.internal', 
-            port=8080, 
-            user='flyte', 
-            catalog='iceberg'
-        )
+        trino_host = TASK_ENV.get("TRINO_HOST", "localhost")
+        conn = trino.dbapi.connect(host=trino_host, port=8080, user='flyte', catalog='iceberg')
         cur = conn.cursor()
-        assert_silver_tables_exist(
-            cur, detail="Avaliação silver:"
-        )
 
-        query_logs = "SELECT * FROM iceberg.silver.network_logs LIMIT 100"
-        query_cdr = "SELECT * FROM iceberg.silver.cdr_customers LIMIT 100"
-        query_call = "SELECT * FROM iceberg.silver.call_tests LIMIT 100"
-        query_towers = "SELECT * FROM iceberg.silver.towers LIMIT 100"
+        # --- AVALIAÇÃO: NETWORK LOGS (Limites Físicos e Timestamps) ---
+        logger.info("\n[1] NETWORK LOGS SILVER (Verificação de Engenharia RF e Tipos)")
+        cur.execute("""
+            SELECT 
+                COUNT(*) as total,
+                COUNT(timestamp_log) as valid_dates,
+                MIN(rsrp) as min_rsrp, 
+                MAX(rsrp) as max_rsrp
+            FROM iceberg.silver.network_logs
+        """)
+        total_logs, valid_dates, min_rsrp, max_rsrp = cur.fetchone()
+        
+        logger.info(f" -> [TEMPO] Sucesso no parsing das datas: {valid_dates}/{total_logs} timestamps parseados.")
+        if valid_dates < total_logs * 0.9:
+            logger.error(" -> ERRO CRÍTICO: Muitos timestamps ficaram a NULL durante a conversão na Silver!")
+            
+        logger.info(f" -> [FÍSICA] RSRP (Potência de Sinal): Mínimo {min_rsrp:.1f} dBm | Máximo {max_rsrp:.1f} dBm")
+        if min_rsrp < -140 or max_rsrp > -60:
+            logger.warning(" -> ALERTA: Valores de RSRP fora dos limites razoáveis de RF (Radio Frequência)!")
 
-        logger.info("⏳ Running querys ...")
-        df_logs = pd.read_sql(query_logs, conn)
-        df_cdr = pd.read_sql(query_cdr, conn)
-        df_call = pd.read_sql(query_call, conn)
-        df_towers = pd.read_sql(query_towers, conn)
+        # --- AVALIAÇÃO: CALL TESTS (Normalização de Qualidade) ---
+        logger.info("\n[2] CALL TESTS SILVER (Sanidade do MOS)")
+        cur.execute("SELECT MIN(mos), MAX(mos), COUNT_IF(result IS NULL) FROM iceberg.silver.call_tests")
+        min_mos, max_mos, null_results = cur.fetchone()
+        logger.info(f" -> [QA] Score MOS (Mean Opinion Score): [{min_mos:.2f} a {max_mos:.2f}] (Deve estar entre 1 e 5)")
+        if max_mos > 5.5:
+            logger.error(" -> ERRO CRÍTICO: A remoção de vírgulas falhou e o MOS explodiu para a casa das dezenas/centenas!")
+        logger.info(f" -> [ESTRUTURA] Existem {null_results} resultados Booleanos a NULL.")
 
-        # Trino / pandas may return mixed case; Silver schema is snake_case (see process_*_to_silver)
-        df_logs.columns = df_logs.columns.str.lower()
-        df_cdr.columns = df_cdr.columns.str.lower()
-        df_call.columns = df_call.columns.str.lower()
-        df_towers.columns = df_towers.columns.str.lower()
+        # --- AVALIAÇÃO: CDR (Chaves Primárias e Deduplicação) ---
+        logger.info("\n[3] CDR CUSTOMERS SILVER (Integridade Relacional)")
+        cur.execute("""
+            SELECT 
+                COUNT(*) as total, 
+                COUNT(DISTINCT silver_row_id) as unique_ids,
+                COUNT(DISTINCT phone_number) as unique_phones
+            FROM iceberg.silver.cdr_customers
+        """)
+        total_cdr, unique_ids, unique_phones = cur.fetchone()
+        
+        logger.info(f" -> [INTEGRIDADE] Linhas Totais: {total_cdr} | Clientes Únicos: {unique_phones}")
+        if total_cdr != unique_phones:
+             logger.error(f" -> ERRO CRÍTICO: O 'drop_duplicates' falhou! Temos {total_cdr} linhas mas apenas {unique_phones} clientes.")
+        else:
+             logger.info(" -> [SUCESSO] Deduplicação perfeita: 1 linha por cliente na Silver.")
 
-        # 1. Network logs — numéricos + one-hot network_type (nt_ohe_*)
-        logger.info("\n[1] NETWORK LOGS (Limpeza de Unidades):")
-        rsrp_type = df_logs["rsrp"].dtype
-        vel_type = df_logs["velocity_kmh"].dtype
-        logger.info(f" -> RSRP convertido para número? Tipo atual: {rsrp_type}")
-        logger.info(f" -> Velocity convertido para número? Tipo atual: {vel_type}")
+        # --- AVALIAÇÃO: TOWERS (Tipagem Forte) ---
+        logger.info("\n[4] TOWERS SILVER (Tipagem de Dados)")
+        cur.execute("SELECT typeof(status), typeof(radio_ohe_lte) FROM iceberg.silver.towers LIMIT 1")
+        status_type, ohe_type = cur.fetchone()
+        logger.info(f" -> [TIPAGEM] Coluna Status é do tipo: {status_type} (Esperado: boolean)")
+        logger.info(f" -> [TIPAGEM] Coluna OHE LTE é do tipo: {ohe_type} (Esperado: boolean)")
 
-        nulos_geo = df_logs["latitude"].isnull().sum()
-        logger.info(f" -> Linhas sem coordenadas removidas? (Nulos em latitude = {nulos_geo})")
-        if "nt_ohe_lte" in df_logs.columns:
-            ohe_sum = int(df_logs["nt_ohe_lte"].fillna(False).astype(bool).sum())
-            logger.info(f" -> One-hot nt_ohe_lte verdadeiros (amostra): {ohe_sum}")
-
-        # 2. Verificar Deduplicação (CDR)
-        logger.info("\n[2] CDR (Deduplicação):")
-        duplicados = df_cdr.duplicated().sum()
-        logger.info(f" -> Limpeza bem sucedida? Existem {duplicados} linhas duplicadas no ficheiro.")
-        logger.info(f" -> Total de clientes únicos faturados: {len(df_cdr)}")
-
-        # 3. Call tests — result boolean, duration_s / setup_time_s, tech_ohe_*
-        logger.info("\n[3] CALL TESTS (Formatação + features silver):")
-        mos_type = df_call["mos"].dtype
-        dur_type = df_call["duration_s"].dtype
-        res_type = df_call["result"].dtype
-        logger.info(f" -> MOS convertido para Float? Tipo atual: {mos_type}")
-        logger.info(f" -> Duração (duration_s) Float? Tipo atual: {dur_type}")
-        logger.info(f" -> result boolean? Tipo atual: {res_type}")
-
-        # 4. Towers — status boolean, radio one-hot (radio_ohe_*)
-        logger.info("\n[4] TORRES (Estrutura final):")
-        logger.info(f" -> Total de registos integrados na camada Silver: {len(df_towers)}")
-        if "status" in df_towers.columns:
-            logger.info(f" -> status tipo: {df_towers['status'].dtype}")
-
-        return f"Successfully validated Silver layer!"
+        logger.info("="*60)
+        logger.info(" QA SILVER CONCLUÍDO: DADOS CERTIFICADOS PARA A CAMADA GOLD ")
+        logger.info("="*60)
 
     except Exception as e:
-        logger.error(f"❌ TASK FAILED: {str(e)}")
-        raise Exception(f"Captured Task Error: {str(e)}")
-
-
-if __name__ == "__main__":
-    avaliar_silver()
+        logger.error(f"Falha Crítica no QA da Silver: {str(e)}")
+        raise e

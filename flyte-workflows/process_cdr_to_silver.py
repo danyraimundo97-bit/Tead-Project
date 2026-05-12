@@ -221,7 +221,7 @@ def process_cdr_to_silver() -> str:
             df.drop(index=q_idx, inplace=True)
 
         initial_rows = len(df)
-        df.drop_duplicates(inplace=True)
+        df.drop_duplicates(subset=["phone_number"], keep="last", inplace=True)
         final_rows = len(df)
         logger.info(
             "Deduplicated CDR: %s rows in, %s rows out (removed %s)",

@@ -163,6 +163,25 @@ def process_towers_to_silver() -> str:
 
         df = transform_towers_silver_features(df)
 
+        # Prevenir acumulação de simulações antigas no S3 (Chave composta OpenCelliD + Data)
+        initial_towers = len(df)
+        df.drop_duplicates(subset=["snapshot_date", "mcc", "net", "area", "cell", "unit"], keep="last", inplace=True)
+        if initial_towers - len(df) > 0:
+            logger.info(f"Deduplicação Torres: varridas {initial_towers - len(df)} linhas antigas.")
+
+        # Forçar limites da realidade (Clipping geográfico e físico)
+        logger.info("A aplicar clipping geofísico às Torres...")
+        if "lat" in df.columns:
+            df["lat"] = df["lat"].clip(lower=38, upper=42)
+        if "lon" in df.columns:
+            df["lon"] = df["lon"].clip(lower=-10, upper=-7)
+        if "range_m" in df.columns:
+            df["range_m"] = df["range_m"].clip(lower=0.0)
+        if "average_signal" in df.columns:
+            # 0 costuma significar 'desconhecido' no OpenCelliD. Sinal real é negativo.
+            df["average_signal"] = df["average_signal"].clip(lower=-140.0, upper=0.0)
+        # -------------------------------------------------------
+
         final_count = len(df)
 
         logger.info("📍 Preparing %s daily tower snapshots for Silver Layer", final_count)

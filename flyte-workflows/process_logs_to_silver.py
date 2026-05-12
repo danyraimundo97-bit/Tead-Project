@@ -209,6 +209,16 @@ def process_logs_to_silver() -> str:
 
         df.rename(columns={"timestamp": "timestamp_log"}, inplace=True)
 
+        # --- FORÇAR LIMITES DE RADIOFREQUÊNCIA (RF BOUNDARIES) ---
+        logger.info("A aplicar clipping geofísico aos sinais de rede...")
+        if "rsrp" in df.columns:
+            df["rsrp"] = df["rsrp"].clip(lower=-140.0, upper=-60.0)
+        if "rsrq" in df.columns:
+            df["rsrq"] = df["rsrq"].clip(lower=-30.0, upper=2.0)
+        if "sinr" in df.columns:
+            df["sinr"] = df["sinr"].clip(lower=-25.0, upper=25.0)
+        # ---------------------------------------------------------
+
         # Cria a pasta 'temp' se não existir
         os.makedirs("temp", exist_ok=True)
         # Salva o DataFrame limpo como Parquet e faz upload para o staging

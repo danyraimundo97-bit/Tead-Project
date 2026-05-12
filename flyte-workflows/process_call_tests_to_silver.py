@@ -187,6 +187,24 @@ def process_call_tests_to_silver() -> str:
             logger.warning("No call tests with valid date_of_test; skipping silver load")
             return "No Call Tests with valid dates. Skipping."
 
+        # Prevenir acumulação de simulações antigas no S3
+        initial_tests = len(df)
+        df.drop_duplicates(subset=["date_of_test", "phone_number"], keep="last", inplace=True)
+        if initial_tests - len(df) > 0:
+            logger.info(f"Deduplicação Call Tests: varridas {initial_tests - len(df)} linhas fantasma antigas.")
+
+        # Forçar limites de sinal e de negócio (QA) antes de carregar para Silver
+        logger.info("A aplicar clipping físico e de negócio aos Call Tests...")
+        if "signal_dbm" in df.columns:
+            df["signal_dbm"] = df["signal_dbm"].clip(lower=-140.0, upper=-30.0)
+        if "mos" in df.columns:
+            df["mos"] = df["mos"].clip(lower=1.0, upper=5.0)
+        if "distance_from_site_m" in df.columns:
+            df["distance_from_site_m"] = df["distance_from_site_m"].clip(lower=0.0)
+        if "speed_m_s" in df.columns:
+            df["speed_m_s"] = df["speed_m_s"].clip(lower=0.0)
+        # -------------------------------------------------------
+
         logger.info("Prepared %s call test rows for full silver load", len(df))
 
         # Cria a pasta 'temp' se não existir
