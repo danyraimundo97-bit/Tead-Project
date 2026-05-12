@@ -140,10 +140,13 @@ services:
       superset init &&
       gunicorn --bind 0.0.0.0:8088 --worker-class gthread --threads 20 --timeout 120 'superset.app:create_app()'
       "
+    volumes:
+      - superset-data:/var/lib/superset  
 
 volumes:
   minio-data:
   metastore-db:
   mlflow-db:
   trino-data:
+  superset-data:
 #  flyte-sandbox:
