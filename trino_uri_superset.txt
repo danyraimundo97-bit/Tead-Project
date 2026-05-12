@@ -1,0 +1,1 @@
+trino://flyte@trino:8080/iceberg

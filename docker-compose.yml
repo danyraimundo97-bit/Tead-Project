@@ -132,7 +132,7 @@ services:
     depends_on:
       - trino
     environment:
-      - SUPERSET_SECRET_KEY=uma_chave_secreta_super_segura_jdpt_2026
+      - SUPERSET_SECRET_KEY=jdpt_2026
     command: >
       /bin/sh -c "
       superset db upgrade &&
