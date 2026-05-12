@@ -2,11 +2,14 @@
 
 Resumo do que cada task `process_*_to_silver` faz aos CSV bronze e ao carregar `iceberg.silver.*`.
 
-## Comum a todos os domínios (padrão do pipeline)
+**Pré-requisito:** ingestão raw → bronze e validação bronze estão documentados em [Raw → Bronze](transicao_raw_para_bronze.md).
+
+## Comum a todos os domínios (padrão do pipeline silver)
 
 - **Leitura:** listagem S3 em `warehouse/bronze/<domínio>/`, concatenação de todos os `*.csv` do prefixo.
 - **Normalização de nomes:** colunas em minúsculas, espaços → `_`, renomes explícitos por domínio (ex.: colunas com parênteses nos logs).
 - **Limpeza numérica:** strings com vírgula decimal → ponto; remoção de lixo textual; `to_numeric`; **circuit breaker** se taxa de destruição > limiar (`silver_quarantine.NUMERIC_DESTROY_THRESHOLD`) → falha da task.
+- **Datas / timestamps:** após o CSV bronze, `pd.to_datetime(..., errors="coerce", format="mixed")` onde aplicável — o pandas não pode assumir só `%Y-%m-%d %H:%M:%S` quando a string traz frações de segundo (ex.: `.132668310`); sem `format="mixed"` uma fatia grande de linhas virava NaT e disparava o circuit breaker de qualidade.
 - **Quarentena:** linhas com campos destruídos na limpeza → insert em tabelas `*_quarantine_raw` / `*_quarantine_audit` (Trino) e remoção do lote principal.
 - **Carga silver:** `TRUNCATE` da tabela Iceberg alvo + **staging** Hive (Parquet no MinIO) + `INSERT` com **`silver_row_id`** monotónico (`ROW_NUMBER` sobre chave de ordenação estável).
 - **Substituição:** silver é **full replace** por execução (não merge incremental por partição na app).
@@ -17,6 +20,7 @@ Resumo do que cada task `process_*_to_silver` faz aos CSV bronze e ao carregar `
 - Tipos fortes para RSRP, RSRQ, SINR, PCI, downlink/uplink, velocidade, lat/lon.
 - **`transform_network_logs_silver_features`:** `network_type` → colunas booleanas `nt_ohe_*`; timestamp como `timestamp_log`.
 - Colunas duplicadas no bronze: mantém-se a **última** ocorrência (útil se existir coluna injetada duplicada).
+- **`timestamp`:** antes da carga, normalização com `format="mixed"` (compatível com timestamps bronze com subsegundos).
 
 ## `process_cdr_to_silver` (`bronze/cdr_customers/` → `silver.cdr_customers`)
 
@@ -28,6 +32,7 @@ Resumo do que cada task `process_*_to_silver` faz aos CSV bronze e ao carregar `
 
 - Leitura CSV com **`decimal=','`** (formato europeu).
 - Limpeza numérica (MOS, duração, setup, distância, sinal, etc.).
+- **`date_of_test`:** parsing com `errors="coerce"` e **`format="mixed"`** para não perder linhas com frações de segundo no CSV bronze.
 - **`transform_call_tests_silver_features`:** `call_test_result` → **`result` boolean** (ex.: `DROP`/`FAIL` → `false`); tecnologia → `tech_ohe_*`; renomes para `duration_s`, `setup_time_s`, etc.
 
 ## `process_towers_to_silver` (`bronze/towers/` → `silver.towers`)

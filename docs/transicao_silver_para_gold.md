@@ -4,7 +4,7 @@ Resumo do que as tasks `build_gold_*` fazem sobre `iceberg.silver.*` e o que mud
 
 ## Pré-requisito no workflow
 
-- **`avaliar_silver`:** validações de qualidade sobre silver (não altera dados; bloqueia avanço para gold se falhar, conforme workflow).
+- **`jdpt_lakehouse_pipeline`** (`flyte-workflows/workflow.py`): `ensure_silver_layer_environment` → quatro tasks `process_*_to_silver` em paralelo (CDR, logs, call tests, torres) → **`avaliar_silver`** (validações de qualidade sobre silver; não altera dados; bloqueia avanço para gold se falhar) → `ensure_gold_layer_environment` → `build_gold_churn_risk` e `build_gold_network_quality` (gold em paralelo após o ambiente gold).
 
 ## `build_gold_network_quality` → `iceberg.gold.network_quality_daily`
 
@@ -30,4 +30,4 @@ Resumo do que as tasks `build_gold_*` fazem sobre `iceberg.silver.*` e o que mud
 
 ## O que a gold não contém
 
-- Não replica linha a linha silver; não substitui quarentena; não recalcula limpezas bronze — assume silver já consistente com as regras das tasks silver.
+- Não replica linha a linha silver; não substitui quarentena; não recalcula limpezas bronze — assume silver já consistente com as regras das tasks silver (incluindo datas/timestamps parseados corretamente a partir dos CSV bronze).
