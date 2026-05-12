@@ -333,6 +333,8 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
             "Zona_Leiria" VARCHAR,
             "Latitude_Ocorrencia" DOUBLE,
             "Longitude_Ocorrencia" DOUBLE,
+            "Torre_Latitude" DOUBLE,
+            "Torre_Longitude" DOUBLE,
             "ID_Antena_Conectada" BIGINT,
             "Estado_Antena" BOOLEAN,
             "Distancia_Antena_m" DOUBLE,

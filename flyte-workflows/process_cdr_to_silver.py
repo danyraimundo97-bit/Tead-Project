@@ -1,8 +1,10 @@
+import gc
 import os
+
 import numpy as np
 import pandas as pd
 import trino
-from flytekit import task, ImageSpec
+from flytekit import ImageSpec, Resources, task
 
 from flyte_task_env import TASK_ENV, minio_s3_client
 from loki_logging import get_logger
@@ -73,7 +75,29 @@ def _clean_churn_series(raw: pd.Series) -> tuple[pd.Series, pd.Series]:
     return cleaned, destroyed
 
 
-@task(container_image=medallion_image, environment=TASK_ENV)
+def _cdr_task_resources() -> tuple[Resources, Resources]:
+    """Small defaults for dev / laptops; override at ``pyflyte register`` time via host env."""
+    return (
+        Resources(
+            cpu=os.environ.get("FLYTE_CDR_TASK_CPU_REQUEST", "500m"),
+            mem=os.environ.get("FLYTE_CDR_TASK_MEM_REQUEST", "512Mi"),
+        ),
+        Resources(
+            cpu=os.environ.get("FLYTE_CDR_TASK_CPU_LIMIT", "2"),
+            mem=os.environ.get("FLYTE_CDR_TASK_MEM_LIMIT", "2Gi"),
+        ),
+    )
+
+
+_cdr_requests, _cdr_limits = _cdr_task_resources()
+
+
+@task(
+    container_image=medallion_image,
+    environment=TASK_ENV,
+    requests=_cdr_requests,
+    limits=_cdr_limits,
+)
 def process_cdr_to_silver() -> str:
     """Downloads Bronze CDR, deduplicates it, and uploads to Silver Iceberg."""
     try:
@@ -81,18 +105,26 @@ def process_cdr_to_silver() -> str:
         s3 = minio_s3_client()
 
         logger.info("⏳ A transferir ficheiros particionados de %s...", SOURCE_FILE_KEY)
-        paginator = s3.get_paginator('list_objects_v2')
-        dfs = []
+        paginator = s3.get_paginator("list_objects_v2")
+        df: pd.DataFrame | None = None
         for page in paginator.paginate(Bucket="warehouse", Prefix=SOURCE_FILE_KEY):
             for obj in page.get("Contents", []):
-                if obj["Key"].endswith(".csv"):
-                    resp = s3.get_object(Bucket="warehouse", Key=obj["Key"])
-                    dfs.append(pd.read_csv(resp["Body"], sep=";"))
-        
-        if not dfs:
+                if not obj["Key"].endswith(".csv"):
+                    continue
+                resp = s3.get_object(Bucket="warehouse", Key=obj["Key"])
+                try:
+                    part = pd.read_csv(resp["Body"], sep=";")
+                finally:
+                    resp["Body"].close()
+                if df is None:
+                    df = part
+                else:
+                    df = pd.concat([df, part], ignore_index=True, copy=False)
+                    del part
+        gc.collect()
+
+        if df is None:
             raise ValueError(f"❌ Nenhum dado particionado encontrado em {SOURCE_FILE_KEY}")
-            
-        df = pd.concat(dfs, ignore_index=True)
 
         lines = pd.Series(np.arange(2, len(df) + 2, dtype=np.int64), index=df.index)
 

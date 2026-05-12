@@ -199,7 +199,7 @@ def process_logs_to_silver() -> str:
 
         df = transform_network_logs_silver_features(df)
 
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
         df = df.dropna(subset=["timestamp"])
         if df.empty:
             logger.warning("No network logs with valid timestamps; skipping silver load")

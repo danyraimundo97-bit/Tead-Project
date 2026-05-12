@@ -128,7 +128,8 @@ def process_call_tests_to_silver() -> str:
         str_nonempty = raw_dt.notna() & (raw_dt.astype(str).str.strip() != "") & (
             raw_dt.astype(str).str.strip().str.lower() != "nan"
         )
-        cleaned_dt = pd.to_datetime(raw_dt, errors="coerce")
+        # CSV com subsegundos (ex. ns) — inferência fixa %Y-%m-%d %H:%M:%S gera NaT em massa
+        cleaned_dt = pd.to_datetime(raw_dt, errors="coerce", format="mixed")
         destroyed_dt = str_nonempty & cleaned_dt.isna()
         destroyed_count = int(destroyed_dt.sum())
         if destroyed_count > 0:

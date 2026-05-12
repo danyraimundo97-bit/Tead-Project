@@ -54,7 +54,8 @@ def avaliar_bronze() -> str:
         
         # 1. Avaliar Data Augmentation (Logs)
         logger.info("\n[1] NETWORK LOGS (Física da Rede):")
-        df_logs['Timestamp'] = pd.to_datetime(df_logs['Timestamp'])
+        # CSV pode trazer subsegundos (ex. ns); inferência fixa %Y-%m-%d %H:%M:%S falha
+        df_logs["Timestamp"] = pd.to_datetime(df_logs["Timestamp"], format="mixed")
         dias_totais = (df_logs['Timestamp'].max() - df_logs['Timestamp'].min()).days
         logger.info(f" -> Período de dados expandido: {dias_totais} dias (De {df_logs['Timestamp'].min().date()} a {df_logs['Timestamp'].max().date()})")
         
@@ -74,7 +75,7 @@ def avaliar_bronze() -> str:
 
         # 3. Avaliar Impacto da Tempestade e Vírgulas (Call Tests)
         logger.info("\n[3] CALL TESTS (Qualidade de Chamada):")
-        df_call['Date Of Test'] = pd.to_datetime(df_call['Date Of Test'])
+        df_call["Date Of Test"] = pd.to_datetime(df_call["Date Of Test"], format="mixed")
         drops = len(df_call[df_call['Call Test Result'] == 'DROP'])
         logger.info(f" -> Total de chamadas que sofreram DROP na simulação: {drops}")
         

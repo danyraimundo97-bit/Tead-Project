@@ -30,6 +30,28 @@ _COUNT_TOWERS_WITH_COORDS = """
     WHERE lat IS NOT NULL AND lon IS NOT NULL
 """
 
+# Silver guarda vários snapshots da mesma célula (mesmo mcc/net/area/cell/unit) com
+# silver_row_id diferentes; o join completo duplica distâncias idênticas e parte os agregados.
+_TOWERS_DEDUP_SQL = """
+    SELECT
+        silver_row_id, mcc, net, area, cell, unit, lat, lon, range_m, samples,
+        changeable, created, updated, average_signal, snapshot_date, status,
+        radio_ohe_gsm, radio_ohe_umts, radio_ohe_lte, radio_ohe_nr,
+        radio_ohe_cdma, radio_ohe_other
+    FROM (
+        SELECT
+            *,
+            ROW_NUMBER() OVER (
+                PARTITION BY mcc, net, area, cell, unit
+                ORDER BY COALESCE(TRY_CAST(snapshot_date AS date), DATE '1900-01-01') DESC,
+                    silver_row_id ASC
+            ) AS tower_rn
+        FROM iceberg.silver.towers
+        WHERE lat IS NOT NULL AND lon IS NOT NULL
+    ) s
+    WHERE tower_rn = 1
+"""
+
 _COUNT_SILVER_LOGS = """
     SELECT COUNT(*) FROM iceberg.silver.network_logs
 """
@@ -68,8 +90,12 @@ def _assert_antenna_columns_sane(cur, *, context: str) -> None:
 def build_gold_network_quality() -> str:
     """
     Gold Produto A: **1 linha por torre (antena) por dia** de calendário.
-    Cada log é atribuído à torre mais próxima (haversine); depois agrega-se por
-    (dia, silver_row_id da torre).
+    Cada log é atribuído à torre mais próxima (haversine); torres silver são
+    deduplicadas por (mcc, net, area, cell, unit) com snapshot mais recente,
+    para não multiplicar a mesma antena física. Médias RSRP/RSRQ/SINR ignoram
+    valores fora de intervalos plausíveis (RSRP ~3GPP -140..-44 dBm; outliers
+    de bronze/silver). Logs sem lat/lon não entram. Zona_Leiria e tecnologia
+    de rede refletem a torre mais próxima, não o nt_ohe_* do terminal.
     """
     logger.info("Gold network_quality_daily: grain = tower × day (closest tower per log)")
 
@@ -112,16 +138,17 @@ def build_gold_network_quality() -> str:
                 FROM iceberg.silver.call_tests
                 GROUP BY phone_number, CAST(date_of_test AS DATE)
             ),
+            towers_for_geo AS (
+                {_TOWERS_DEDUP_SQL.strip()}
+            ),
             log_tower_dist AS (
                 SELECT
                     nl.silver_row_id,
                     t.silver_row_id AS tower_silver_row_id,
                     {_HAVERSINE_NL_T} AS dist_m
                 FROM iceberg.silver.network_logs nl
-                INNER JOIN iceberg.silver.towers t
-                    ON t.lat IS NOT NULL
-                    AND t.lon IS NOT NULL
-                    AND nl.latitude IS NOT NULL
+                INNER JOIN towers_for_geo t
+                    ON nl.latitude IS NOT NULL
                     AND nl.longitude IS NOT NULL
             ),
             dist_ranked AS (
@@ -130,7 +157,8 @@ def build_gold_network_quality() -> str:
                     tower_silver_row_id,
                     dist_m,
                     ROW_NUMBER() OVER (
-                        PARTITION BY silver_row_id ORDER BY dist_m ASC
+                        PARTITION BY silver_row_id
+                        ORDER BY dist_m ASC, tower_silver_row_id ASC
                     ) AS rn
                 FROM log_tower_dist
             ),
@@ -164,6 +192,8 @@ def build_gold_network_quality() -> str:
                 END AS "Zona_Leiria",
                 t.lat AS "Latitude_Ocorrencia",
                 t.lon AS "Longitude_Ocorrencia",
+                t.lat AS "Torre_Latitude",
+                t.lon AS "Torre_Longitude",
                 CAST(t.cell AS BIGINT) AS "ID_Antena_Conectada",
                 t.status AS "Estado_Antena",
                 ROUND(AVG(e.dist_m), 2) AS "Distancia_Antena_m",
@@ -175,10 +205,22 @@ def build_gold_network_quality() -> str:
                     WHEN t.radio_ohe_cdma THEN 'CDMA'
                     ELSE 'OTHER'
                 END AS "Tecnologia_Rede",
-                ROUND(AVG(e.rsrp), 2) AS "Potencia_RSRP",
-                ROUND(AVG(e.rsrq), 2) AS "Qualidade_RSRQ",
-                ROUND(AVG(e.sinr), 2) AS "Ruido_SINR",
-                ROUND(AVG(e.downlink_mbps), 2) AS "Velocidade_Downlink",
+                ROUND(
+                    AVG(
+                        CASE
+                            WHEN e.rsrp BETWEEN -140 AND -44 THEN e.rsrp
+                        END
+                    ),
+                    2
+                ) AS "Potencia_RSRP",
+                ROUND(AVG(CASE WHEN e.rsrq BETWEEN -50 AND 30 THEN e.rsrq END), 2)
+                    AS "Qualidade_RSRQ",
+                ROUND(AVG(CASE WHEN e.sinr BETWEEN -30 AND 80 THEN e.sinr END), 2)
+                    AS "Ruido_SINR",
+                ROUND(
+                    AVG(CASE WHEN e.downlink_mbps BETWEEN 0 AND 5000 THEN e.downlink_mbps END),
+                    2
+                ) AS "Velocidade_Downlink",
                 CAST(COUNT(DISTINCT CASE WHEN tb.last_result = TRUE THEN e.phone_number END) AS BIGINT)
                     AS "Telefones_Sucesso",
                 CAST(COUNT(DISTINCT CASE WHEN tb.last_result = FALSE THEN e.phone_number END) AS BIGINT)
@@ -186,7 +228,7 @@ def build_gold_network_quality() -> str:
                 CAST(COUNT(DISTINCT CASE WHEN tb.last_result IS NULL THEN e.phone_number END) AS BIGINT)
                     AS "Telefones_Sem_Teste"
             FROM enriched e
-            INNER JOIN iceberg.silver.towers t ON t.silver_row_id = e.tower_silver_row_id
+            INNER JOIN towers_for_geo t ON t.silver_row_id = e.tower_silver_row_id
             LEFT JOIN tests_by_day tb
                 ON e.phone_number = tb.phone_number
                 AND e.log_day = tb.d

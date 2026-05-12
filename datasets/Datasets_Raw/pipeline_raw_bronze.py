@@ -3,6 +3,10 @@ Pipeline (Raw -> Bronze)
 Objetivo: Transformar os datasets originais num cenário "Bronze"
           localizado em Leiria, durante a tempestade Kristin (Jan 2026),
           e guardar com particionamento diário (day=YYYY-MM-DD) para a camada Bronze no MinIO.
+
+A mesma lógica no Flyte está centralizada em ``flyte-workflows/bronze_storm_simulation.py``
+(tasks finas em ``ingest_*_raw_to_bronze.py``). Mantém este script para correr localmente
+sem Flyte.
 """
 
 import pandas as pd
@@ -70,6 +74,8 @@ def gerar_camada_bronze_diaria():
     segundos_em_16_dias = 16 * 24 * 60 * 60
     random_deltas = pd.to_timedelta(np.random.randint(0, segundos_em_16_dias, size=len(df_call)), unit='s')
     df_call['Date Of Test'] = pd.to_datetime('2026-01-20 00:00:00') + random_deltas
+    # read_csv pode deixar datetime64[us]; loc com timestamps ns falha nesse dtype
+    df_call['Date Of Test'] = df_call['Date Of Test'].astype('datetime64[ns]')
 
     # =====================================================================
     # CRUZAMENTO DE IDENTIDADES (PHONE NUMBERS)
@@ -97,7 +103,13 @@ def gerar_camada_bronze_diaria():
     
     np.random.seed(42)
     torres_Leste_indices = df_towers_leiria[df_towers_leiria['lon'] > -8.80].index
-    torres_destruidas_indices = np.random.choice(torres_Leste_indices, size=int(len(torres_Leste_indices)*0.80), replace=False)
+    torres_destruidas_indices = np.random.choice(
+        torres_Leste_indices, size=int(len(torres_Leste_indices) * 0.80), replace=False
+    )
+    # Coordenadas das torres que passam a DOWN (>= 28 Jan) — usar antes do concat de snapshots
+    down_tower_coords = (
+        df_towers_leiria.loc[torres_destruidas_indices, ["lat", "lon"]].drop_duplicates().to_numpy()
+    )
 
     for dia in dias_simulacao:
         df_t = df_towers_leiria.copy()
@@ -118,7 +130,19 @@ def gerar_camada_bronze_diaria():
     # DEGRADAR O SINAL DE RÁDIO (Logs) E CONGESTIONAMENTO
     cond_log_tempestade_Leste = (df_logs['Timestamp'] >= inicio_tempestade) & (df_logs['Timestamp'] <= fim_tempestade) & (df_logs['Longitude'] > -8.80)
     cond_log_tempestade_Oeste = (df_logs['Timestamp'] >= inicio_tempestade) & (df_logs['Timestamp'] <= fim_tempestade) & (df_logs['Longitude'] <= -8.80)
-    
+
+    # Colar logs da tempestade (Leste) às torres que ficam DOWN: assim a gold (torre mais próxima)
+    # atribui tráfego a antenas caídas, não só a torres ACTIVE mais próximas por acaso.
+    if len(down_tower_coords) > 0:
+        n_storm = int(cond_log_tempestade_Leste.sum())
+        if n_storm > 0:
+            rng_geo = np.random.default_rng(44)
+            picks = down_tower_coords[rng_geo.integers(0, len(down_tower_coords), size=n_storm)]
+            jitter_lat = rng_geo.uniform(-0.0018, 0.0018, size=n_storm)
+            jitter_lon = rng_geo.uniform(-0.0018, 0.0018, size=n_storm)
+            df_logs.loc[cond_log_tempestade_Leste, "Latitude"] = picks[:, 0] + jitter_lat
+            df_logs.loc[cond_log_tempestade_Leste, "Longitude"] = picks[:, 1] + jitter_lon
+
     # Degradar Logs de Rede (RSRP)
     def piorar_rsrp_string(val):
         if isinstance(val, str) and 'dBm' in val:
@@ -149,21 +173,43 @@ def gerar_camada_bronze_diaria():
     # Descobrimos QUAIS OS NÚMEROS DE TELEFONE exatos que estavam no Leste durante a tempestade
     clientes_Leste = df_logs.loc[cond_log_tempestade_Leste, 'Phone_Number'].unique()
 
-    # QUEDAS DE CHAMADA APENAS PARA NÚMEROS DE TELEFONE QUE ESTAVAM NO LESTE DURANTE A TEMPESTADE
-    cond_call_tempestade = (df_call['Date Of Test'] >= inicio_tempestade) & (df_call['Date Of Test'] <= fim_tempestade) & (df_call['Phone_Number'].isin(clientes_Leste))
-    
+    # Empurrar mais call tests destes clientes para a janela 28–30 Jan (antes só ~3/16 por sorteio uniforme),
+    # para a gold (join por dia) mostrar Telefones_Falha de forma consistente.
+    rng_call = np.random.default_rng(45)
+    mask_phone_l = df_call['Phone_Number'].isin(clientes_Leste)
+    mask_in_storm = (df_call['Date Of Test'] >= inicio_tempestade) & (df_call['Date Of Test'] <= fim_tempestade)
+    outside_storm = mask_phone_l & ~mask_in_storm
+    if outside_storm.any():
+        idx_out = df_call.loc[outside_storm].index.to_numpy()
+        move = rng_call.random(len(idx_out)) < 0.72
+        to_move = idx_out[move]
+        if len(to_move) > 0:
+            span_sec = (fim_tempestade - inicio_tempestade).total_seconds()
+            new_times = inicio_tempestade + pd.to_timedelta(
+                rng_call.uniform(0.0, span_sec, size=len(to_move)), unit="s"
+            )
+            df_call.loc[to_move, 'Date Of Test'] = new_times
+
+    # QUEDAS DE CHAMADA: mesmos clientes do Leste na tempestade, datas agora mais densas na janela
+    cond_call_tempestade = (
+        (df_call['Date Of Test'] >= inicio_tempestade)
+        & (df_call['Date Of Test'] <= fim_tempestade)
+        & (df_call['Phone_Number'].isin(clientes_Leste))
+    )
+    n_drop = int(cond_call_tempestade.sum())
+
     df_call.loc[cond_call_tempestade, 'Call Test Result'] = 'DROP'
-    df_call.loc[cond_call_tempestade, 'MOS'] = np.random.uniform(1.0, 1.8, size=cond_call_tempestade.sum()).astype(str)
+    df_call.loc[cond_call_tempestade, 'MOS'] = np.random.uniform(1.0, 1.8, size=n_drop).astype(str)
     df_call['MOS'] = df_call['MOS'].astype(str).str.replace('.', ',')
 
     # Aumento do tempo de ligação (congestionamento) e distância (ligados a antenas distantes)
-    df_call.loc[cond_call_tempestade, 'Call Test Duration (s)'] = np.random.uniform(2.0, 12.0, size=cond_call_tempestade.sum()).astype(str)
+    df_call.loc[cond_call_tempestade, 'Call Test Duration (s)'] = np.random.uniform(2.0, 12.0, size=n_drop).astype(str)
     df_call['Call Test Duration (s)'] = df_call['Call Test Duration (s)'].astype(str).str.replace('.', ',')
 
-    df_call.loc[cond_call_tempestade, 'Call Test Setup Time (s)'] = np.random.uniform(15.0, 45.0, size=cond_call_tempestade.sum()).astype(str)
+    df_call.loc[cond_call_tempestade, 'Call Test Setup Time (s)'] = np.random.uniform(15.0, 45.0, size=n_drop).astype(str)
     df_call['Call Test Setup Time (s)'] = df_call['Call Test Setup Time (s)'].astype(str).str.replace('.', ',')
     
-    df_call.loc[cond_call_tempestade, 'Distance from site (m)'] = np.random.uniform(5000, 15000, size=cond_call_tempestade.sum()).astype(str)
+    df_call.loc[cond_call_tempestade, 'Distance from site (m)'] = np.random.uniform(5000, 15000, size=n_drop).astype(str)
     df_call['Distance from site (m)'] = df_call['Distance from site (m)'].astype(str).str.replace('.', ',')
 
     # CAOS NO SUPORTE E CHURN APENAS PARA ESSES NÚMEROS (Na Tabela de Faturação)
