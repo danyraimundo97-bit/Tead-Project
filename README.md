@@ -10,9 +10,9 @@ A local data platform for development and experimentation, combining a **Docker 
 │               Docker Compose Stack                  │
 │                                                     │
 │  MinIO (S3) ──► Hive Metastore ──► Trino            │
-│      │               │                              │
-│      └──► MLflow ◄───┘                              │
-│           (Postgres)                                │
+│      │               │              ▲               │
+│      └──► MLflow ◄───┘              │               │
+│           (Postgres)         Redpanda (Kafka)       │
 └─────────────────────────────────────────────────────┘
           ▲              ▲             ▲
           │  host ports  │             │
@@ -30,9 +30,12 @@ A local data platform for development and experimentation, combining a **Docker 
 | `mc` | One-shot bucket bootstrapper (exits on success) | — |
 | `metastore-db` | MariaDB backend for Hive Metastore | internal |
 | `hive-metastore` | Hive Metastore (Thrift) for Iceberg/Hive catalogs | `9083` |
-| `trino` | Distributed query engine | `8080` |
+| `trino` | Distributed query engine (Hive, Iceberg, **Kafka**) | `8080` |
+| `redpanda` | Kafka-compatible bus para ingestão streaming | `19092` |
 | `mlflow-db` | Postgres backend for MLflow | internal |
 | `mlflow` | MLflow tracking server | `15000` |
+| `loki` / `grafana` | Logs do pipeline Flyte | `3100` / `3000` |
+| `superset` | BI / dashboards | `8088` |
 
 **External container (Flyte):**
 
@@ -54,9 +57,15 @@ A local data platform for development and experimentation, combining a **Docker 
 │       ├── jvm.config
 │       ├── node.properties
 │       ├── log.properties
-│       └── catalog/
-│           ├── hive.properties      # Hive catalog (backed by MinIO)
-│           └── iceberg.properties   # Iceberg catalog (backed by MinIO)
+│       ├── catalog/
+│       │   ├── hive.properties      # Hive catalog (backed by MinIO)
+│       │   ├── iceberg.properties   # Iceberg catalog (backed by MinIO)
+│       │   └── kafka.properties     # Kafka catalog (Redpanda)
+│       └── kafka/                   # Schemas JSON dos tópicos Kafka
+├── python_scripts/                  # Producer de eventos (streaming)
+├── sql_scripts/                     # DDL streaming (bronze/silver/gold)
+├── flyte-workflows/                 # Batch + workflows streaming
+├── docs/streaming.md                # Guia do ramo streaming
 ├── mlflow/
 │   └── Dockerfile                   # Extends MLflow image with psycopg2
 └── flyte/
@@ -133,14 +142,19 @@ You should see confirmation that the `warehouse` and `mlflow` buckets were creat
 docker compose exec trino trino --execute "SHOW CATALOGS;"
 ```
 
-Expected output:
+Expected output (inclui catálogo **kafka** após adaptação streaming):
 ```
 iceberg
 hive
+kafka
 system
 tpcds
 tpch
 ```
+
+## Streaming (Kafka / Redpanda)
+
+O projeto inclui um ramo **streaming** (TEAD 2.0 v1.3) em paralelo com o lakehouse batch de telecom. Ver **[docs/streaming.md](docs/streaming.md)** para: subir Redpanda, criar tabelas, correr o producer e os workflows `streaming_kafka_to_bronze_workflow` / `jdpt_streaming_*`.
 
 **MLflow:** Open http://localhost:15000 — you should see the MLflow tracking UI with no experiments yet.
 
@@ -264,7 +278,8 @@ minio
  └── mc (bucket bootstrap, then exits)
  └── hive-metastore
       └── metastore-db (MariaDB)
-      └── trino
+ redpanda
+      └── trino (hive + kafka catalogs)
  └── mlflow
       └── mlflow-db (Postgres)
 

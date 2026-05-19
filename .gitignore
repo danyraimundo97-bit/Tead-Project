@@ -1,3 +1,6 @@
-flyte-workflows/__pycache__/*
-
-flyte-workflows/__pycache__/process_call_tests_to_silver.cpython-312.pyc
+__pycache__/
+*.pyc
+.DS_Store
+*.zip
+churn_risk_daily_*.json
+network_quality_daily_*.json

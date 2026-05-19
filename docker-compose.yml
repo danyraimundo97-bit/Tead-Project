@@ -48,10 +48,24 @@ services:
     volumes:
       - ./hive/conf:/opt/apache-hive-metastore-3.0.0-bin/conf:ro
 
-  # --- Trino (query engine) ---
+  # --- Redpanda (Kafka-compatible streaming bus) ---
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.2.1
+    container_name: redpanda
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+
+  # --- Trino (query engine + Kafka catalog) ---
   trino:
     image: trinodb/trino:468
-    depends_on: [hive-metastore]
+    depends_on: [hive-metastore, redpanda]
     ports:
       - "8080:8080"
     volumes:

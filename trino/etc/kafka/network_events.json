@@ -1,0 +1,55 @@
+{
+    "tableName": "network_events",
+    "schemaName": "default",
+    "topicName": "network_events",
+    "message": {
+        "dataFormat": "json",
+        "fields": [
+            {
+                "name": "event_id",
+                "mapping": "event_id",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "phone_number",
+                "mapping": "phone_number",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "device_id",
+                "mapping": "device_id",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "network_type",
+                "mapping": "network_type",
+                "type": "VARCHAR"
+            },
+            {
+                "name": "rsrp",
+                "mapping": "rsrp",
+                "type": "DOUBLE"
+            },
+            {
+                "name": "sinr",
+                "mapping": "sinr",
+                "type": "DOUBLE"
+            },
+            {
+                "name": "latitude",
+                "mapping": "latitude",
+                "type": "DOUBLE"
+            },
+            {
+                "name": "longitude",
+                "mapping": "longitude",
+                "type": "DOUBLE"
+            },
+            {
+                "name": "event_time",
+                "mapping": "event_time",
+                "type": "VARCHAR"
+            }
+        ]
+    }
+}
