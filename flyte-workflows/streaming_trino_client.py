@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
-from typing import Sequence
+from datetime import datetime, timezone
+from typing import Any, Sequence
 
 TRINO_HOST = "host.docker.internal"
 TRINO_PORT = 8080
@@ -27,6 +27,51 @@ _NON_TRANSIENT_PATTERNS = re.compile(
 )
 
 PIPELINE_CHECKPOINT_NAME = "bronze_to_silver_network_events"
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _reraise_trino(exc: BaseException) -> None:
+    """Flyte falha ao serializar TrinoUserError; usar RuntimeError com mensagem legível."""
+    raise RuntimeError(f"Trino/SQL error: {exc}") from exc
+
+
+def normalize_watermark(value: Any) -> datetime:
+    """Converte valor devolvido pelo driver Trino para datetime com timezone UTC."""
+    if value is None:
+        return _EPOCH
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        text = value.replace(" UTC", "").strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid watermark timestamp: {value!r}") from exc
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    raise RuntimeError(f"Unsupported watermark type: {type(value)!r} ({value!r})")
+
+
+def ensure_streaming_prerequisites(cur) -> None:
+    """Garante tabela de checkpoint (evita falha se migrate/setup não foi corrido)."""
+    execute_with_retry(
+        cur,
+        """
+        CREATE TABLE IF NOT EXISTS iceberg.bronze.streaming_checkpoints (
+            pipeline_name VARCHAR,
+            last_silver_watermark TIMESTAMP(6) WITH TIME ZONE,
+            updated_at TIMESTAMP(6) WITH TIME ZONE
+        )
+        WITH (
+            format = 'PARQUET',
+            location = 's3a://warehouse/bronze/streaming_checkpoints/'
+        )
+        """,
+    )
 
 
 def get_trino_connection(
@@ -87,11 +132,11 @@ def execute_with_retry(
         except BaseException as exc:
             last_exc = exc
             if attempt >= max_attempts - 1 or not is_transient_error(exc):
-                raise
+                _reraise_trino(exc)
             wait = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
             time.sleep(wait)
     if last_exc is not None:
-        raise last_exc
+        _reraise_trino(last_exc)
 
 
 def fetch_one_with_retry(
@@ -110,26 +155,35 @@ def fetch_one_with_retry(
         except BaseException as exc:
             last_exc = exc
             if attempt >= max_attempts - 1 or not is_transient_error(exc):
-                raise
+                _reraise_trino(exc)
             wait = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
             time.sleep(wait)
     if last_exc is not None:
-        raise last_exc
+        _reraise_trino(last_exc)
     return None
 
 
 def read_silver_watermark(cur) -> datetime:
     """Watermark: checkpoint persistido, com fallback para MAX(ingested_at) na silver."""
-    row = fetch_one_with_retry(
-        cur,
-        f"""
-        SELECT last_silver_watermark
-        FROM iceberg.bronze.streaming_checkpoints
-        WHERE pipeline_name = '{PIPELINE_CHECKPOINT_NAME}'
-        """,
-    )
+    ensure_streaming_prerequisites(cur)
+
+    row = None
+    try:
+        row = fetch_one_with_retry(
+            cur,
+            f"""
+            SELECT last_silver_watermark
+            FROM iceberg.bronze.streaming_checkpoints
+            WHERE pipeline_name = '{PIPELINE_CHECKPOINT_NAME}'
+            """,
+        )
+    except RuntimeError as exc:
+        if "does not exist" not in str(exc).lower():
+            raise
+        # Tabela em falta: fallback para silver
+
     if row and row[0] is not None:
-        return row[0]
+        return normalize_watermark(row[0])
 
     row = fetch_one_with_retry(
         cur,
@@ -141,7 +195,7 @@ def read_silver_watermark(cur) -> datetime:
         FROM iceberg.silver.network_events_clean
         """,
     )
-    return row[0] if row else datetime(1970, 1, 1)
+    return normalize_watermark(row[0] if row else None)
 
 
 def write_silver_checkpoint(cur) -> None:

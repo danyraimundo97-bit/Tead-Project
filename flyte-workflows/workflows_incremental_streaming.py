@@ -34,6 +34,13 @@ GOLD_WINDOW_DAYS = 7
 
 @task(**STREAMING_TASK_KWARGS)
 def incremental_bronze_to_silver_network_events() -> str:
+    try:
+        return _incremental_bronze_to_silver_network_events()
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _incremental_bronze_to_silver_network_events() -> str:
     conn = get_trino_connection(catalog="iceberg")
     cur = conn.cursor()
 
@@ -95,13 +102,20 @@ def incremental_bronze_to_silver_network_events() -> str:
     write_silver_checkpoint(cur)
     return (
         f"Bronze → silver incremental "
-        f"(watermark={watermark}, lookback={WATERMARK_LOOKBACK_HOURS}h)."
+        f"(watermark={watermark.isoformat()}, lookback={WATERMARK_LOOKBACK_HOURS}h)."
     )
 
 
 @task(**STREAMING_TASK_KWARGS)
 def silver_to_gold_network_events_hourly() -> str:
     """Gold idempotente: DELETE da janela + INSERT (chave bucket_hour, network_type)."""
+    try:
+        return _silver_to_gold_network_events_hourly()
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _silver_to_gold_network_events_hourly() -> str:
     conn = get_trino_connection(catalog="iceberg")
     cur = conn.cursor()
 

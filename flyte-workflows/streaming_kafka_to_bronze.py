@@ -26,6 +26,13 @@ STREAMING_TASK_KWARGS = {
 
 @task(**STREAMING_TASK_KWARGS)
 def ingest_kafka_to_bronze() -> str:
+    try:
+        return _ingest_kafka_to_bronze()
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _ingest_kafka_to_bronze() -> str:
     batch_id = str(uuid.uuid4())
     conn = get_trino_connection(catalog="iceberg", schema="bronze")
     cur = conn.cursor()
@@ -42,9 +49,26 @@ def ingest_kafka_to_bronze() -> str:
             sinr,
             latitude,
             longitude,
-            event_time AS event_time_raw
-        FROM kafka.default.network_events
-        WHERE event_id IS NOT NULL
+            event_time_raw
+        FROM (
+            SELECT
+                event_id,
+                phone_number,
+                device_id,
+                network_type,
+                rsrp,
+                sinr,
+                latitude,
+                longitude,
+                event_time AS event_time_raw,
+                ROW_NUMBER() OVER (
+                    PARTITION BY event_id
+                    ORDER BY event_time DESC
+                ) AS rn
+            FROM kafka.default.network_events
+            WHERE event_id IS NOT NULL
+        ) kafka_deduped
+        WHERE rn = 1
     ) AS source
     ON target.event_id = source.event_id
     WHEN NOT MATCHED THEN INSERT (

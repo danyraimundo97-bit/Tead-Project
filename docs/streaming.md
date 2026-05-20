@@ -131,6 +131,20 @@ pyflyte run --remote flyte-workflows/avaliar_streaming.py jdpt_streaming_quality
 
 Para dashboards Superset, pode registar `iceberg.gold.network_events_hourly` como dataset adicional.
 
+## Erros Flyte (`TypeError: bad argument type`)
+
+Se o **2.º workflow** falhar com `TypeError: bad argument type for built-in operation` no `pyflyte-execute`, o Flyte **escondeu** o erro real do Trino. Ver os logs brutos do pod ou voltar a correr após `pyflyte register` com o código atualizado (as tasks re-levantam `RuntimeError` com a mensagem SQL).
+
+**`MERGE_TARGET_ROW_MULTIPLE_MATCHES` no kafka→bronze:** o tópico Kafka tem o mesmo `event_id` várias vezes (producer ~10% duplicados). O workflow deduplica com `ROW_NUMBER` antes do MERGE. Se a bronze já tiver duplicados de runs antigas com `INSERT`, descomenta a limpeza em `migrate_streaming_dedup.sql`.
+
+Causas frequentes do 2.º passo (`jdpt_streaming_incremental_sync` / `full_sync`):
+
+1. Não correr `sql_scripts/setup_streaming_tables.sql` (falta `silver.network_events_clean` ou `streaming_checkpoints`).
+2. Bronze vazio — correr primeiro `streaming_kafka_to_bronze_workflow` com o producer ativo.
+3. Coluna `ingest_batch_id` em falta na bronze — correr `migrate_streaming_dedup.sql`.
+
+Ordem correta: **setup SQL** → **producer** → **kafka_to_bronze** → **incremental** ou **full_sync**.
+
 ## Portas e credenciais
 
 | Serviço | Host (Flyte tasks) | Host (máquina local) |
