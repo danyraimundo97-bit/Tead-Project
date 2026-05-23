@@ -54,7 +54,7 @@ NULL_RATES = {
 def _configure_logging(*, use_loki: bool, loki_url: str) -> logging.Logger:
     if use_loki:
         os.environ.setdefault("LOKI_URL", loki_url)
-        from loki_logging import get_logger
+        from workflow_functions.loki_logging import get_logger
 
         return get_logger("producer_network_events")
 

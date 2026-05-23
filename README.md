@@ -64,7 +64,7 @@ A local data platform for development and experimentation, combining a **Docker 
 │       └── kafka/                   # Schemas JSON dos tópicos Kafka
 ├── python_scripts/                  # Producer de eventos (streaming)
 ├── sql_scripts/                     # DDL streaming (bronze/silver/gold)
-├── flyte-workflows/                 # Batch + workflows streaming
+├── flyte-workflows/                 # @task/@workflow (raiz); helpers em workflow_functions/
 ├── docs/streaming.md                # Guia do ramo streaming
 ├── mlflow/
 │   └── Dockerfile                   # Extends MLflow image with psycopg2
@@ -154,7 +154,7 @@ tpch
 
 ## Streaming (Kafka / Redpanda)
 
-O projeto inclui um ramo **streaming** (TEAD 2.0 v1.3) em paralelo com o lakehouse batch de telecom. Ver **[docs/streaming.md](docs/streaming.md)** para: subir Redpanda, criar tabelas, correr o producer e os workflows `streaming_kafka_to_bronze_workflow` / `jdpt_streaming_*`.
+O projeto inclui um ramo **streaming** (TEAD 2.0 v1.3) em paralelo com o lakehouse batch de telecom. Ver **[docs/streaming.md](docs/streaming.md)** para: subir Redpanda, criar tabelas, correr o producer e o workflow `jdpt_streaming_full_sync`.
 
 **MLflow:** Open http://localhost:15000 — you should see the MLflow tracking UI with no experiments yet.
 

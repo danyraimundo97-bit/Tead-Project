@@ -36,7 +36,7 @@ Diagramas ER: [lakehouse_er.md](lakehouse_er.md). Fluxos: [lakehouse_tables.md](
 
 A tabela guarda **uma linha por pipeline** (`pipeline_name`), com o último ponto processado na silver (`last_silver_watermark`). É um **cursor**, não um histórico.
 
-- **`write_silver_checkpoint`** ([`streaming_trino_client.py`](../flyte-workflows/streaming_trino_client.py)) usa `MERGE`: na 1.ª execução faz **INSERT**; nas seguintes faz **UPDATE** da mesma linha com `MAX(ingested_at)` da silver.
+- **`write_silver_checkpoint`** ([`workflow_functions/streaming_trino_client.py`](../flyte-workflows/workflow_functions/streaming_trino_client.py)) usa `MERGE`: na 1.ª execução faz **INSERT**; nas seguintes faz **UPDATE** da mesma linha com `MAX(ingested_at)` da silver.
 - **INSERT em cada run** criaria várias linhas com o mesmo `pipeline_name`. O `read_silver_watermark` faria `fetchone()` sem ordem garantida — risco de ler um watermark antigo e falhar o incremental.
 - Alternativa equivalente: `DELETE` + `INSERT` para esse `pipeline_name`. O `MERGE` faz upsert numa só statement.
 
@@ -45,14 +45,13 @@ Fluxo: bronze→silver com sucesso → atualiza checkpoint → próximo run lê 
 ### Retries
 
 - **Flyte:** tasks streaming com `retries=3` e `timeout=15min`.
-- **Trino:** `execute_with_retry` em [`streaming_trino_client.py`](../flyte-workflows/streaming_trino_client.py) (até 3 tentativas, backoff 2s, 5s, 10s).
+- **Trino:** `execute_with_retry` em [`workflow_functions/streaming_trino_client.py`](../flyte-workflows/workflow_functions/streaming_trino_client.py) (até 3 tentativas, backoff 2s, 5s, 10s).
 - **Producer:** `acks=all`, `retries=3`, `enable_idempotence=True`. Simula ~10% **duplicados** e, por defeito, **nulls/campos inválidos** (RSRP/SINR/GPS, telefone, `network_type`, timestamp) para testar cleansing na silver. Usar `--no-nulls` para desativar.
 
 ### Ordem recomendada
 
-1. **`jdpt_streaming_full_sync`** — pipeline completo (Kafka → bronze → silver → gold) em [`streaming_full_sync.py`](../flyte-workflows/streaming_full_sync.py)
-2. Ou passos isolados: `streaming_kafka_to_bronze_workflow`, `jdpt_streaming_incremental_sync`, `jdpt_streaming_silver_to_gold_sync`
-3. `jdpt_streaming_quality_check` (opcional)
+1. **`jdpt_streaming_full_sync`** — pipeline incremental completo (Kafka → bronze → silver → gold) em [`streaming_full_sync.py`](../flyte-workflows/streaming_full_sync.py)
+2. `jdpt_streaming_quality_check` (opcional, QA)
 
 ### Duplicados: producer vs retry
 
@@ -146,11 +145,15 @@ SELECT * FROM kafka.default.network_events LIMIT 10;
 
 | Workflow | Ficheiro | Função |
 |----------|----------|--------|
-| **`jdpt_streaming_full_sync`** | `streaming_full_sync.py` | **Kafka → bronze → silver → gold** |
-| `streaming_kafka_to_bronze_workflow` | `streaming_kafka_to_bronze.py` | Só Kafka → bronze |
-| `jdpt_streaming_incremental_sync` | `workflows_incremental_streaming.py` | Só bronze → silver |
-| `jdpt_streaming_silver_to_gold_sync` | `streaming_silver_to_gold.py` | Só silver → gold |
-| `jdpt_streaming_quality_check` | `avaliar_streaming.py` | QA duplicados e órfãos |
+| **`jdpt_streaming_full_sync`** | `streaming_full_sync.py` | **Kafka → bronze → silver → gold** (único pipeline incremental) |
+| `jdpt_streaming_quality_check` | `avaliar_streaming.py` | QA duplicados e órfãos (opcional) |
+
+| Camada | Task (raiz) | Lógica (`workflow_functions/streaming/`) |
+|--------|-------------|------------------------------------------|
+| Kafka → bronze | `streaming_kafka_to_bronze.py` | `kafka_to_bronze.py` |
+| Bronze → silver | `workflows_incremental_streaming.py` | `bronze_to_silver.py` |
+| Silver → gold | `streaming_silver_to_gold.py` | `silver_to_gold.py` |
+| QA | `avaliar_streaming.py` | `quality.py` |
 
 Exemplo (pipeline completo):
 
@@ -173,13 +176,13 @@ Se o **2.º workflow** falhar com `TypeError: bad argument type for built-in ope
 
 **`MERGE_TARGET_ROW_MULTIPLE_MATCHES` no kafka→bronze:** o tópico Kafka tem o mesmo `event_id` várias vezes (producer ~10% duplicados). O workflow deduplica com `ROW_NUMBER` antes do MERGE. Se a bronze já tiver duplicados de runs antigas com `INSERT`, descomenta a limpeza em `migrate_streaming_dedup.sql`.
 
-Causas frequentes do bronze→silver (`jdpt_streaming_incremental_sync` ou passo 2 do `full_sync`):
+Causas frequentes do bronze→silver (passo 2 do `full_sync`):
 
 1. Não correr `sql_scripts/setup_streaming_tables.sql` (falta `silver.network_events_clean` ou `streaming_checkpoints`).
-2. Bronze vazio — correr primeiro `streaming_kafka_to_bronze_workflow` com o producer ativo.
+2. Bronze vazio — producer ativo antes de `jdpt_streaming_full_sync` (o passo 1 do workflow ingere Kafka→bronze).
 3. Coluna `ingest_batch_id` em falta na bronze — correr `migrate_streaming_dedup.sql`.
 
-Ordem correta: **setup SQL** → **producer** → **`jdpt_streaming_full_sync`** (ou passos isolados).
+Ordem correta: **setup SQL** → **producer** → **`jdpt_streaming_full_sync`**.
 
 ## Portas e credenciais
 
@@ -193,7 +196,7 @@ Ordem correta: **setup SQL** → **producer** → **`jdpt_streaming_full_sync`**
 
 ## Logs no Grafana (Loki)
 
-O **producer** (host) e as **tasks Flyte** enviam logs para Loki via [`loki_logging.py`](../flyte-workflows/loki_logging.py).
+O **producer** (host) e as **tasks Flyte** enviam logs para Loki via [`workflow_functions/loki_logging.py`](../flyte-workflows/workflow_functions/loki_logging.py).
 
 | Origem | `module` (label Loki) | URL Loki |
 |--------|----------------------|----------|

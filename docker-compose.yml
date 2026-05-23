@@ -73,32 +73,32 @@ services:
       - trino-data:/data/trino
 
   # --- MLflow (tracking server + backend DB) ---
-  mlflow-db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: mlflow
-      POSTGRES_USER: mlflow
-      POSTGRES_PASSWORD: mlflow
-    volumes:
-      - mlflow-db:/var/lib/postgresql/data
+ # mlflow-db:
+ #   image: postgres:16
+  #  environment:
+ #     POSTGRES_DB: mlflow
+ #     POSTGRES_USER: mlflow
+  #    POSTGRES_PASSWORD: mlflow
+  #  volumes:
+  #    - mlflow-db:/var/lib/postgresql/data
 
-  mlflow:
-    build:
-      context: ./mlflow
-      dockerfile: Dockerfile
-    image: tead-mlflow:v2.12.1-pg
-    depends_on: [mlflow-db, minio, mc]
-    ports:
-      - "15000:5000"
-    environment:
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-    command: >
-      mlflow server
-      --host 0.0.0.0 --port 5000
-      --backend-store-uri postgresql://mlflow:mlflow@mlflow-db:5432/mlflow
-      --default-artifact-root s3://mlflow/
+  #mlflow:
+  #  build:
+  #    context: ./mlflow
+  #    dockerfile: Dockerfile
+   # image: tead-mlflow:v2.12.1-pg
+   # depends_on: [mlflow-db, minio, mc]
+   # ports:
+   #   - "15000:5000"
+   # environment:
+   #   AWS_ACCESS_KEY_ID: minioadmin
+   #   AWS_SECRET_ACCESS_KEY: minioadmin
+   #   MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+   # command: >
+   #   mlflow server
+   #   --host 0.0.0.0 --port 5000
+   #   --backend-store-uri postgresql://mlflow:mlflow@mlflow-db:5432/mlflow
+  #    --default-artifact-root s3://mlflow/
   
 #  flyte:
 #    build:

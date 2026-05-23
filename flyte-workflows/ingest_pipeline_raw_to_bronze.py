@@ -2,9 +2,9 @@
 
 from flytekit import ImageSpec, task
 
-from bronze_storm_simulation import get_storage_options, run_bronze_storm_simulation
+from workflow_functions.bronze_storm_simulation import get_storage_options, run_bronze_storm_simulation
 from flyte_task_env import TASK_ENV
-from loki_logging import get_logger
+from workflow_functions.loki_logging import get_logger
 
 logger = get_logger(__name__)
 

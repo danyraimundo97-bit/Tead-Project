@@ -7,7 +7,7 @@ Verifica: Volumetria final, tipagem rigorosa para BI, ausência absoluta de NULL
 import trino
 from flytekit import task, ImageSpec
 from flyte_task_env import TASK_ENV
-from loki_logging import get_logger
+from workflow_functions.loki_logging import get_logger
 
 logger = get_logger(__name__)
 

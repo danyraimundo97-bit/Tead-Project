@@ -1,6 +1,6 @@
 # Raw → Bronze
 
-Resumo da simulação **Leiria / tempestade (jan. 2026)**: leitura dos CSV em `Dados_Raw`, transformação e escrita de partições **bronze** no MinIO/S3. A lógica de negócio está em `flyte-workflows/bronze_storm_simulation.py`.
+Resumo da simulação **Leiria / tempestade (jan. 2026)**: leitura dos CSV em `Dados_Raw`, transformação e escrita de partições **bronze** no MinIO/S3. A lógica de negócio está em `flyte-workflows/workflow_functions/bronze_storm_simulation.py`.
 
 **Bronze sintético (schema apenas):** `python python_scripts/produce_bronze_batch.py` — gera partições `bronze/*/day=*/data.csv` com as colunas esperadas pelo batch silver, **sem** ler RAW nem simular tempestade.
 

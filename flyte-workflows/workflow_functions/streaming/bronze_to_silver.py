@@ -1,15 +1,12 @@
-"""Bronze → silver incremental (watermark + MERGE + checkpoint)."""
+"""Bronze → silver incremental: watermark, cleanse SQL, MERGE, checkpoint."""
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
-from flytekit import ImageSpec, task, workflow
-
-from flyte_task_env import TASK_ENV
-from loki_logging import get_logger
-from streaming_audit import fetch_scalar, log_table_insert
-from streaming_trino_client import (
+from workflow_functions.streaming_audit import fetch_scalar, log_table_insert
+from workflow_functions.streaming_trino_client import (
     execute_with_retry,
     format_trino_timestamp,
     get_trino_connection,
@@ -17,28 +14,12 @@ from streaming_trino_client import (
     write_silver_checkpoint,
 )
 
-logger = get_logger(__name__)
-
 BRONZE_TABLE = "iceberg.bronze.network_events_raw"
 SILVER_TABLE = "iceberg.silver.network_events_clean"
-
-streaming_image = ImageSpec(
-    name="jdpt_streaming_env",
-    packages=["trino", "python-logging-loki"],
-    registry="localhost:30000",
-)
-
-STREAMING_TASK_KWARGS = {
-    "container_image": streaming_image,
-    "environment": TASK_ENV,
-    "retries": 3,
-    "timeout": timedelta(minutes=15),
-}
-
 WATERMARK_LOOKBACK_HOURS = 1
 
 
-def _cleansed_source_subquery(lower_literal: str) -> str:
+def cleansed_source_subquery(lower_literal: str) -> str:
     return f"""
         SELECT
             event_id,
@@ -103,16 +84,16 @@ def _cleansed_source_subquery(lower_literal: str) -> str:
     """
 
 
-def _incremental_bronze_to_silver_network_events() -> str:
+def process_bronze_to_silver(logger: logging.Logger) -> str:
     function = "incremental_bronze_to_silver_network_events"
     conn = get_trino_connection(catalog="iceberg")
     cur = conn.cursor()
 
     watermark = read_silver_watermark(cur)
+    #lower_bound = watermark - timedelta(hours=WATERMARK_LOOKBACK_HOURS) + timedelta(hours=2)
     lower_bound = watermark - timedelta(hours=WATERMARK_LOOKBACK_HOURS)
     lower_literal = format_trino_timestamp(lower_bound)
-    #source_sql = _cleansed_source_subquery(lower_literal + " + INTERVAL '2 hours'")
-    source_sql = _cleansed_source_subquery(lower_literal)
+    source_sql = cleansed_source_subquery(lower_literal)
 
     log_table_insert(
         logger,
@@ -201,18 +182,3 @@ def _incremental_bronze_to_silver_network_events() -> str:
         f"inseridos_estimados={rows_inserted}, total_silver={silver_after} "
         f"(watermark={watermark.isoformat()}, lookback={WATERMARK_LOOKBACK_HOURS}h)."
     )
-
-
-@task(**STREAMING_TASK_KWARGS)
-def incremental_bronze_to_silver_network_events() -> str:
-    try:
-        return _incremental_bronze_to_silver_network_events()
-    except Exception as exc:
-        logger.exception("Bronze → silver incremental falhou")
-        raise RuntimeError(str(exc)) from exc
-
-
-@workflow
-def jdpt_streaming_incremental_sync() -> str:
-    """Promove eventos de bronze para silver (idempotente por event_id)."""
-    return incremental_bronze_to_silver_network_events()

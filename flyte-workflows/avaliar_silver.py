@@ -7,7 +7,7 @@ Verifica: Unicidade das chaves primárias (Row IDs), Plausibilidade Física de g
 import trino
 from flytekit import task, ImageSpec
 from flyte_task_env import TASK_ENV
-from loki_logging import get_logger
+from workflow_functions.loki_logging import get_logger
 
 logger = get_logger(__name__)
 

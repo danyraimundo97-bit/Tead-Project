@@ -7,8 +7,8 @@ import trino
 from flytekit import ImageSpec, Resources, task
 
 from flyte_task_env import TASK_ENV, minio_s3_client
-from loki_logging import get_logger
-from silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
+from workflow_functions.loki_logging import get_logger
+from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
 
 logger = get_logger(__name__)
 

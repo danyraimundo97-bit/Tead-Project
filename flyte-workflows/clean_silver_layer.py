@@ -10,7 +10,7 @@ import trino
 from flytekit import ImageSpec, task, workflow
 
 from flyte_task_env import TASK_ENV, minio_s3_client
-from loki_logging import get_logger
+from workflow_functions.loki_logging import get_logger
 
 logger = get_logger(__name__)
 
