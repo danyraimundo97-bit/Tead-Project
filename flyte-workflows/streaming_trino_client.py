@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -13,18 +12,6 @@ TRINO_USER = "tead"
 
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_BACKOFF_SECONDS: tuple[int, ...] = (2, 5, 10)
-
-_TRANSIENT_PATTERNS = re.compile(
-    r"timeout|timed out|connection|network|broken pipe|"
-    r"server shutting down|too many requests|service unavailable",
-    re.IGNORECASE,
-)
-
-_NON_TRANSIENT_PATTERNS = re.compile(
-    r"syntax error|column .* cannot be resolved|table .* does not exist|"
-    r"schema .* does not exist|type mismatch|invalid cast",
-    re.IGNORECASE,
-)
 
 PIPELINE_CHECKPOINT_NAME = "bronze_to_silver_network_events"
 
@@ -38,6 +25,10 @@ def _reraise_trino(exc: BaseException) -> None:
 
 def normalize_watermark(value: Any) -> datetime:
     """Converte valor devolvido pelo driver Trino para datetime com timezone UTC."""
+    #Se o valor for None, retorna o epoch
+    #Se o valor for um datetime, retorna o datetime como timezone UTC
+    #Se o valor for uma string, converte para datetime como timezone UTC
+    #Se o valor for de um tipo não suportado, retorna um erro
     if value is None:
         return _EPOCH
     if isinstance(value, datetime):
@@ -89,6 +80,7 @@ def get_trino_connection(
     }
     if schema is not None:
         kwargs["schema"] = schema
+        # ** this is to convert the dictionary into keyword arguments
     return trino.dbapi.connect(**kwargs)
 
 
@@ -102,20 +94,6 @@ def format_trino_timestamp(value: datetime) -> str:
     return f"TIMESTAMP '{text} UTC'"
 
 
-def is_transient_error(exc: BaseException) -> bool:
-    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
-        return True
-    message = str(exc)
-    if _NON_TRANSIENT_PATTERNS.search(message):
-        return False
-    if _TRANSIENT_PATTERNS.search(message):
-        return True
-    exc_name = type(exc).__name__
-    if exc_name in ("TrinoConnectionError", "TrinoExternalError"):
-        return True
-    return False
-
-
 def execute_with_retry(
     cur,
     sql: str,
@@ -123,7 +101,7 @@ def execute_with_retry(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     backoff_seconds: Sequence[int] = DEFAULT_BACKOFF_SECONDS,
 ) -> None:
-    """Executa SQL com backoff em erros transitórios."""
+    """Executa SQL com até ``max_attempts`` tentativas (backoff entre falhas)."""
     last_exc: BaseException | None = None
     for attempt in range(max_attempts):
         try:
@@ -131,10 +109,9 @@ def execute_with_retry(
             return
         except BaseException as exc:
             last_exc = exc
-            if attempt >= max_attempts - 1 or not is_transient_error(exc):
+            if attempt >= max_attempts - 1:
                 _reraise_trino(exc)
-            wait = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
-            time.sleep(wait)
+            time.sleep(backoff_seconds[min(attempt, len(backoff_seconds) - 1)])
     if last_exc is not None:
         _reraise_trino(last_exc)
 
@@ -146,7 +123,7 @@ def fetch_one_with_retry(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     backoff_seconds: Sequence[int] = DEFAULT_BACKOFF_SECONDS,
 ):
-    """Executa SELECT e devolve uma linha com retry."""
+    """Executa SELECT e devolve uma linha com até ``max_attempts`` tentativas."""
     last_exc: BaseException | None = None
     for attempt in range(max_attempts):
         try:
@@ -154,10 +131,9 @@ def fetch_one_with_retry(
             return cur.fetchone()
         except BaseException as exc:
             last_exc = exc
-            if attempt >= max_attempts - 1 or not is_transient_error(exc):
+            if attempt >= max_attempts - 1:
                 _reraise_trino(exc)
-            wait = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
-            time.sleep(wait)
+            time.sleep(backoff_seconds[min(attempt, len(backoff_seconds) - 1)])
     if last_exc is not None:
         _reraise_trino(last_exc)
     return None

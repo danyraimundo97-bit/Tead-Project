@@ -1,0 +1,30 @@
+flowchart TB
+  subgraph bronze_minio ["MinIO bronze CSV"]
+    b_logs["network_logs CSV"]
+    b_cdr["cdr_customers CSV"]
+    b_tests["call_tests CSV"]
+    b_towers["towers CSV"]
+  end
+
+  subgraph silver_iceberg ["iceberg.silver"]
+    s_logs["network_logs"]
+    s_cdr["cdr_customers"]
+    s_tests["call_tests"]
+    s_towers["towers"]
+  end
+
+  subgraph gold_iceberg ["iceberg.gold"]
+    g_quality["network_quality_daily"]
+    g_churn["churn_risk_daily"]
+  end
+
+  b_logs --> s_logs
+  b_cdr --> s_cdr
+  b_tests --> s_tests
+  b_towers --> s_towers
+
+  s_logs --> g_quality
+  s_towers --> g_quality
+  s_cdr --> g_churn
+  s_tests --> g_churn
+  s_logs --> g_churn

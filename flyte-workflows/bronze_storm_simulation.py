@@ -17,17 +17,29 @@ import pandas as pd
 from flyte_task_env import TASK_ENV
 
 
+def get_local_storage_options(
+    *,
+    endpoint_url: str = "http://localhost:9000",
+    key: str = "minioadmin",
+    secret: str = "minioadmin",
+) -> dict[str, Any]:
+    """Credenciais S3/MinIO para execução local (host ou script)."""
+    return {
+        "key": key,
+        "secret": secret,
+        "client_kwargs": {"endpoint_url": endpoint_url},
+    }
+
+
 def get_storage_options() -> dict[str, Any]:
     """Credenciais S3/MinIO a partir do ambiente do pod Flyte."""
-    return {
-        "key": TASK_ENV.get("AWS_ACCESS_KEY_ID", "minioadmin"),
-        "secret": TASK_ENV.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
-        "client_kwargs": {
-            "endpoint_url": TASK_ENV.get(
-                "MLFLOW_S3_ENDPOINT_URL", "http://host.docker.internal:9000"
-            )
-        },
-    }
+    return get_local_storage_options(
+        endpoint_url=TASK_ENV.get(
+            "MLFLOW_S3_ENDPOINT_URL", "http://host.docker.internal:9000"
+        ),
+        key=TASK_ENV.get("AWS_ACCESS_KEY_ID", "minioadmin"),
+        secret=TASK_ENV.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+    )
 
 
 def _towers_phase(

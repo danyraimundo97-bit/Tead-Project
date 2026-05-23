@@ -1,0 +1,40 @@
+erDiagram
+  SILVER_CDR_CUSTOMERS ||--o{ SILVER_NETWORK_LOGS : phone_number
+  SILVER_CDR_CUSTOMERS ||--o{ SILVER_CALL_TESTS : phone_number
+  SILVER_TOWERS ||--o{ SILVER_NETWORK_LOGS : join_espacial
+
+  SILVER_CDR_CUSTOMERS {
+    int silver_row_id PK
+    string phone_number
+    boolean churn
+    float day_mins
+    int custserv_calls
+  }
+
+  SILVER_NETWORK_LOGS {
+    int silver_row_id PK
+    string timestamp_log
+    string phone_number FK
+    float rsrp
+    float sinr
+    float latitude
+    float longitude
+  }
+
+  SILVER_CALL_TESTS {
+    int silver_row_id PK
+    string phone_number FK
+    string date_of_test
+    float mos
+    boolean result
+  }
+
+  SILVER_TOWERS {
+    int silver_row_id PK
+    int mcc
+    int net
+    int area
+    int cell
+    float lat
+    float lon
+  }

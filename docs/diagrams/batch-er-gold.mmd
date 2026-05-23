@@ -1,0 +1,45 @@
+erDiagram
+  SILVER_NETWORK_LOGS ||--o{ GOLD_NETWORK_QUALITY_DAILY : builds
+  SILVER_TOWERS ||--o{ GOLD_NETWORK_QUALITY_DAILY : joins
+  SILVER_CDR_CUSTOMERS ||--o{ GOLD_CHURN_RISK_DAILY : builds
+  SILVER_CALL_TESTS ||--o{ GOLD_CHURN_RISK_DAILY : builds
+  SILVER_NETWORK_LOGS ||--o{ GOLD_CHURN_RISK_DAILY : builds
+
+  GOLD_NETWORK_QUALITY_DAILY {
+    int gold_row_id PK
+    string Data_Hora
+    string Telefone
+    float Potencia_RSRP
+    int ID_Antena_Conectada
+    float Distancia_Antena_m
+  }
+
+  GOLD_CHURN_RISK_DAILY {
+    int gold_row_id PK
+    date Data_Referencia
+    string Telefone FK
+    boolean Desistencia
+    float Receita_Em_Risco
+    boolean Afetado_Tempestade
+  }
+
+  SILVER_NETWORK_LOGS {
+    int silver_row_id PK
+    string phone_number
+  }
+
+  SILVER_TOWERS {
+    int silver_row_id PK
+    float lat
+    float lon
+  }
+
+  SILVER_CDR_CUSTOMERS {
+    int silver_row_id PK
+    string phone_number
+  }
+
+  SILVER_CALL_TESTS {
+    int silver_row_id PK
+    string phone_number
+  }

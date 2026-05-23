@@ -77,7 +77,6 @@ def avaliar_streaming() -> str:
               AND b.ingestion_timestamp >= CURRENT_TIMESTAMP
                     - INTERVAL '{ORPHAN_WINDOW_HOURS}' HOUR
               AND b.event_id IS NOT NULL
-              AND b.rsrp IS NOT NULL
         )
         """,
     )
@@ -108,7 +107,8 @@ def avaliar_streaming() -> str:
         issues.append(f"silver tem {silver_dupes} linhas duplicadas por event_id")
     if orphans > 0:
         issues.append(
-            f"{orphans} event_id(s) em bronze (válidos) ainda não estão na silver"
+            f"{orphans} event_id(s) em bronze ainda não estão na silver "
+            f"(últimas {ORPHAN_WINDOW_HOURS}h; inclui rejeitados pelo cleanse)"
         )
 
     if issues:

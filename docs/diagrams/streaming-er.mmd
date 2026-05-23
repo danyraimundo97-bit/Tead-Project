@@ -1,0 +1,60 @@
+erDiagram
+  KAFKA_NETWORK_EVENTS ||--o{ BRONZE_NETWORK_EVENTS_RAW : "0..N por event_id"
+  BRONZE_NETWORK_EVENTS_RAW ||--o| SILVER_NETWORK_EVENTS_CLEAN : "0..1 por event_id"
+  SILVER_NETWORK_EVENTS_CLEAN }o--|| GOLD_NETWORK_EVENTS_HOURLY : "N agrega por hora e rede"
+  STREAMING_CHECKPOINTS ||--o| SILVER_NETWORK_EVENTS_CLEAN : "controla watermark"
+
+  KAFKA_NETWORK_EVENTS {
+    string event_id PK
+    string phone_number
+    string device_id
+    string network_type
+    float rsrp
+    float sinr
+    float latitude
+    float longitude
+    string event_time
+  }
+
+  BRONZE_NETWORK_EVENTS_RAW {
+    string event_id PK
+    string phone_number
+    string device_id
+    string network_type
+    float rsrp
+    float sinr
+    float latitude
+    float longitude
+    string event_time_raw
+    string ingestion_timestamp
+    string ingest_batch_id
+  }
+
+  STREAMING_CHECKPOINTS {
+    string pipeline_name PK
+    string last_silver_watermark
+    string updated_at
+  }
+
+  SILVER_NETWORK_EVENTS_CLEAN {
+    string event_id PK
+    string phone_number
+    string device_id
+    string network_type
+    float rsrp
+    float sinr
+    float latitude
+    float longitude
+    string event_time
+    string ingested_at
+  }
+
+  GOLD_NETWORK_EVENTS_HOURLY {
+    string bucket_hour PK
+    string network_type PK
+    int event_count
+    float avg_rsrp
+    float avg_sinr
+    int poor_signal_count
+    string updated_at
+  }

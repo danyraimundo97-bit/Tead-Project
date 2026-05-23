@@ -1,6 +1,10 @@
 # Raw → Bronze
 
-Resumo da simulação **Leiria / tempestade (jan. 2026)**: leitura dos CSV em `Dados_Raw`, transformação e escrita de partições **bronze** no MinIO/S3. A lógica de negócio está em `flyte-workflows/bronze_storm_simulation.py`; o script offline equivalente é `datasets/Datasets_Raw/pipeline_raw_bronze.py`.
+Resumo da simulação **Leiria / tempestade (jan. 2026)**: leitura dos CSV em `Dados_Raw`, transformação e escrita de partições **bronze** no MinIO/S3. A lógica de negócio está em `flyte-workflows/bronze_storm_simulation.py`.
+
+**Bronze sintético (schema apenas):** `python python_scripts/produce_bronze_batch.py` — gera partições `bronze/*/day=*/data.csv` com as colunas esperadas pelo batch silver, **sem** ler RAW nem simular tempestade.
+
+**Bronze completo (tempestade Leiria a partir de RAW):** Flyte `ingest_pipeline_raw_to_bronze` ou `run_bronze_storm_simulation` em `bronze_storm_simulation.py` (requer `python setup_raw_data.py` antes).
 
 ## Origem (camada raw no bucket `warehouse`)
 
