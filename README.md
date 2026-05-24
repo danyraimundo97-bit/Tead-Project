@@ -34,10 +34,10 @@ docker compose down -v     # reset total
 | Serviço | URL | Credenciais |
 |---------|-----|-------------|
 | MinIO API | http://localhost:9000 | `minioadmin` / `minioadmin` |
-| MinIO Console | http://localhost:9001 | idem |
+| MinIO Console | http://localhost:9001 | 
 | Trino | http://localhost:8080 | sem auth |
 | Redpanda (Kafka) | `localhost:19092` | — |
-| Grafana | http://localhost:3000 | anónimo Admin |
+| Grafana | http://localhost:3000 |  Admin |
 | Loki | http://localhost:3100 | — |
 | Superset | http://localhost:8088 | `admin` / `admin` |
 | Flyte Console | http://localhost:30080 | sandbox |
@@ -130,26 +130,23 @@ Validar Kafka no Trino:
 SELECT * FROM kafka.default.network_events LIMIT 10;
 ```
 
-Migração bronze antiga (sem `ingest_batch_id`): `sql_scripts/migrate_streaming_dedup.sql`.
-
 ---
 
 ## 4. Diagramas e figuras
 
-### Fontes (Mermaid / BPMN)
+### Figuras (PNG)
+
+Pasta: `docs/Relatório/figuras/` — usadas no relatório (`docs/Relatório/main.tex`, `\graphicspath{{figuras/}}`).
 
 | Conteúdo | Ficheiro |
 |----------|----------|
-| Tabelas batch (Mermaid) | `docs/diagrams/lakehouse-tables-batch.mmd` |
-| Tabelas streaming (Mermaid) | `docs/diagrams/lakehouse-tables-streaming.mmd` |
-| BPMN batch (editar em bpmn.io) | `docs/diagrams/batch-jdpt_lakehouse_pipeline.bpmn` |
-| BPMN streaming | `docs/diagrams/streaming-jdpt_streaming_full_sync.bpmn` |
+| Arquitetura | `Architecture.png` |
+| Tabelas batch | `Batch tables.png` |
+| BPMN batch (`jdpt_lakehouse_pipeline`) | `batch-jdpt_lakehouse_pipeline.png` |
+| BPMN streaming (`jdpt_streaming_full_sync`) | `streaming-jdpt_streaming_full_sync.png` |
+| ER / linhagem Gold (batch) | `batch-er-gold.png` |
 
-Visualizar `.mmd`: [mermaid.live](https://mermaid.live) (um ficheiro de cada vez).
-
-### Figuras para o relatório (PNG/PDF)
-
-Pasta: `docs/Relatório/figuras/` — exportar BPMN e diagramas a partir do bpmn.io / Mermaid CLI e usar em `docs/Relatório/main.tex`.
+O diagrama de **tabelas streaming** ainda não tem PNG nesta pasta; a fonte editável é `docs/diagrams/lakehouse-tables-streaming.mmd`. Para alterar os restantes diagramas, ver `docs/diagrams/*.mmd` e `*.bpmn`.
 
 ---
 
@@ -238,7 +235,6 @@ Opções do producer: `--no-nulls`, `--no-loki`, `--broker localhost:19092`.
 | Ficheiro | Uso |
 |----------|-----|
 | `sql_scripts/setup_streaming_tables.sql` | Tabelas bronze/silver/gold streaming |
-| `sql_scripts/migrate_streaming_dedup.sql` | Migração dedup / `ingest_batch_id` |
 | `trino/etc/catalog/iceberg.properties` | Catálogo Iceberg |
 | `trino/etc/catalog/kafka.properties` | Catálogo Kafka → Redpanda |
 | `trino/etc/kafka/network_events.json` | Schema tópico `network_events` |
