@@ -152,11 +152,11 @@ Pasta `docs/Relatório/figuras/` (também usadas em `docs/Relatório/main.tex`).
 
 ![BPMN streaming](docs/Relatório/figuras/streaming-jdpt_streaming_full_sync.png)
 
-### ER / linhagem Gold (batch)
+### Tabelas streaming
 
-![ER Gold batch](docs/Relatório/figuras/batch-er-gold.png)
+![Tabelas streaming (lakehouse)](docs/Relatório/figuras/Streaming%20tables.png)
 
-O diagrama de **tabelas streaming** ainda não tem PNG nesta pasta; a fonte editável é `docs/diagrams/lakehouse-tables-streaming.mmd`. Para alterar os restantes diagramas, ver `docs/diagrams/*.mmd` e `*.bpmn`.
+Para alterar os diagramas, ver `docs/diagrams/lakehouse-tables-streaming.mmd`, `lakehouse-tables-batch.mmd` e `docs/diagrams/*.bpmn`.
 
 ---
 
@@ -212,7 +212,6 @@ Registar datasets sobre `iceberg.gold.network_quality_daily`, `iceberg.gold.chur
 | Construção Gold | `docs/Relatório/Ficheiro de construção da camada gold.md` |
 | Data Products / Contratos v1 | `docs/Data_Products - Data_Contracts/v1/` |
 | Data Products / Contratos v2 | `docs/Data_Products - Data_Contracts/v2/` |
-| Governança | `docs/Data_Products - Data_Contracts/GOVERNANCA_DATA_PRODUCTS.md` |
 
 ---
 
@@ -250,16 +249,6 @@ Opções do producer: `--no-nulls`, `--no-loki`, `--broker localhost:19092`.
 | `trino/etc/kafka/network_events.json` | Schema tópico `network_events` |
 
 ---
-
-## Resolução de problemas
-
-| Sintoma | Acção |
-|---------|--------|
-| `mc` termina logo | Normal; `docker compose logs mc` |
-| Trino sem catálogos | `docker compose restart trino` após metastore |
-| Flyte não alcança MinIO/Trino | `host.docker.internal`; ver secção 2 |
-| Streaming bronze vazio | Producer antes de `jdpt_streaming_full_sync` |
-| Falha Flyte opaca (`TypeError`) | Logs do pod; `pyflyte register` + repetir run |
 
 ```bash
 docker compose logs -f trino
