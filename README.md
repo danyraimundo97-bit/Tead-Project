@@ -134,17 +134,27 @@ SELECT * FROM kafka.default.network_events LIMIT 10;
 
 ## 4. Diagramas e figuras
 
-### Figuras (PNG)
+Pasta `docs/Relatório/figuras/` (também usadas em `docs/Relatório/main.tex`). Pré-visualização em Markdown: `![legenda](caminho/para/ficheiro.png)`.
 
-Pasta: `docs/Relatório/figuras/` — usadas no relatório (`docs/Relatório/main.tex`, `\graphicspath{{figuras/}}`).
+### Arquitetura
 
-| Conteúdo | Ficheiro |
-|----------|----------|
-| Arquitetura | `Architecture.png` |
-| Tabelas batch | `Batch tables.png` |
-| BPMN batch (`jdpt_lakehouse_pipeline`) | `batch-jdpt_lakehouse_pipeline.png` |
-| BPMN streaming (`jdpt_streaming_full_sync`) | `streaming-jdpt_streaming_full_sync.png` |
-| ER / linhagem Gold (batch) | `batch-er-gold.png` |
+![Arquitetura TEAD](docs/Relatório/figuras/Architecture.png)
+
+### Tabelas batch
+
+![Tabelas batch (lakehouse)](docs/Relatório/figuras/Batch%20tables.png)
+
+### BPMN batch — `jdpt_lakehouse_pipeline`
+
+![BPMN batch](docs/Relatório/figuras/batch-jdpt_lakehouse_pipeline.png)
+
+### BPMN streaming — `jdpt_streaming_full_sync`
+
+![BPMN streaming](docs/Relatório/figuras/streaming-jdpt_streaming_full_sync.png)
+
+### ER / linhagem Gold (batch)
+
+![ER Gold batch](docs/Relatório/figuras/batch-er-gold.png)
 
 O diagrama de **tabelas streaming** ainda não tem PNG nesta pasta; a fonte editável é `docs/diagrams/lakehouse-tables-streaming.mmd`. Para alterar os restantes diagramas, ver `docs/diagrams/*.mmd` e `*.bpmn`.
 
