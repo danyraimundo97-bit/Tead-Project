@@ -77,17 +77,22 @@ AWS_SECRET_ACCESS_KEY=minioadmin
 
 ### Caminho A — Batch (obrigatório para Produtos Gold A/B)
 
-| Ordem | Workflow | Ficheiro | Quando |
-|-------|----------|----------|--------|
-| 1 | `ingestion_workflow` | `flyte-workflows/raw_bronze_workflow.py` | Bronze MinIO vazio: RAW → bronze (simulação Leiria) |
+| Ordem | Ação | Ficheiro | Quando |
+|-------|------|----------|--------|
+| 0 | **`setup_raw_data`** | `setup_raw_data.py` | Landing zone vazia: envia os CSV de `datasets/Datasets_Raw/` para `s3://warehouse/Dados_Raw/` |
+| 1 | `ingestion_workflow` | `flyte-workflows/raw_bronze_workflow.py` | Bronze MinIO vazio: lê `Dados_Raw` no S3 e escreve bronze (simulação Leiria) |
 | 2 | **`jdpt_lakehouse_pipeline`** | `flyte-workflows/workflow.py` | Silver + Gold (snapshot completo) |
 
-Se o bronze já estiver em `s3://warehouse/bronze/` (ex.: datasets preparados), **saltar o passo 1**.
+O passo **1 não faz upload** dos ficheiros raw: assume que já estão no MinIO (passo 0 ou upload anterior). Se `Dados_Raw` já existir no bucket, **saltar o passo 0**. Se o bronze já estiver em `s3://warehouse/bronze/` (partições `day=*/data.csv`), **saltar o passo 1**.
 
 ```bash
+# Pré-requisito: stack Docker a correr (secção 1) e Flyte sandbox (secção 2)
+pip install boto3
+python setup_raw_data.py
+
 pyflyte register flyte-workflows/
 
-# Opcional — só se bronze estiver vazio
+# Opcional — só se bronze estiver vazio (requer Dados_Raw no MinIO)
 pyflyte run --remote flyte-workflows/raw_bronze_workflow.py ingestion_workflow
 
 # Pipeline principal batch
@@ -220,6 +225,7 @@ Bronze no MinIO para o batch: prefixos `warehouse/bronze/cdr_customers/`, `netwo
 
 | Script | Função |
 |--------|--------|
+| `setup_raw_data.py` | Upload dos 4 CSV raw de `datasets/Datasets_Raw/` → `s3://warehouse/Dados_Raw/` (MinIO `localhost:9000`) |
 | `python_scripts/producer_network_events.py` | Eventos sintéticos → tópico `network_events` |
 | `python_scripts/requirements.txt` | Dependências (`kafka-python`, `python-logging-loki`, …) |
 
