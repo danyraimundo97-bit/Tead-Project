@@ -11,7 +11,9 @@ Resumo do que cada task `process_*_to_silver` faz aos CSV bronze e ao carregar `
 - **Limpeza numérica:** strings com vírgula decimal → ponto; remoção de lixo textual; `to_numeric`; **circuit breaker** se taxa de destruição > limiar (`silver_quarantine.NUMERIC_DESTROY_THRESHOLD`) → falha da task.
 - **Datas / timestamps:** após o CSV bronze, `pd.to_datetime(..., errors="coerce", format="mixed")` onde aplicável — o pandas não pode assumir só `%Y-%m-%d %H:%M:%S` quando a string traz frações de segundo (ex.: `.132668310`); sem `format="mixed"` uma fatia grande de linhas virava NaT e disparava o circuit breaker de qualidade.
 - **Quarentena:** linhas com campos destruídos na limpeza → insert em tabelas `*_quarantine_raw` / `*_quarantine_audit` (Trino) e remoção do lote principal.
-- **Carga silver:** `TRUNCATE` da tabela Iceberg alvo + **staging** Hive (Parquet no MinIO) + `INSERT` com **`silver_row_id`** monotónico (`ROW_NUMBER` sobre chave de ordenação estável).
+- **Carga silver (ACID):** transacção Trino única — `START TRANSACTION` → `DELETE FROM iceberg.silver.<tabela> WHERE TRUE` → `INSERT INTO ... SELECT ... FROM hive.staging.temp_<tabela>` → `COMMIT`. Falhas disparam `ROLLBACK` e o snapshot anterior fica preservado (`workflow_functions/trino_acid.py`). `TRUNCATE` foi removido por não respeitar transacções no Iceberg Trino.
+- **Staging:** Parquet em MinIO via `hive.staging.temp_<tabela>` (external_location) — inalterado.
+- **`silver_row_id` monotónico:** `ROW_NUMBER` sobre chave estável; com DELETE prévio na mesma transacção, `MAX(silver_row_id)` devolve NULL → COALESCE dá 0.
 - **Substituição:** silver é **full replace** por execução (não merge incremental por partição na app).
 
 ## `process_logs_to_silver` (`bronze/network_logs/` → `silver.network_logs`)

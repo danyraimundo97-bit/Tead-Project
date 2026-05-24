@@ -1,0 +1,73 @@
+# ================ #
+# DATA PRODUCT A   #
+# Versão: v1.1.0 (batch estático — alinhamento operacional)
+# Base schema: v1/Produto A - gold.network_quality_daily.txt
+# Comparação: ../COMPARACAO_v1_v2.md
+# ================ #
+
+product:
+  id: gold.network_quality_daily
+  layer: gold
+  domain: network_operations
+  owner:
+    team: noc-engineering
+    contact: noc@jdpt.pt
+  description: >
+    Métricas diárias de condições de rádio, testes de chamada agregados por torre
+    e estado físico das infraestruturas em Leiria (pós-tempestade).
+  consumers:
+    - name: bi.infrastructure_map
+      type: bi
+      access: trino_sql
+    - name: superset.network_quality_dashboard
+      type: bi
+      access: trino_sql
+
+delivery:
+  storage:
+    system: minio
+    format: iceberg
+    bucket: warehouse
+    table_identifier: iceberg.gold.network_quality_daily
+    partitions:
+      - day("Data_Hora")
+    update_mode: acid_replace
+  serving:
+    query_engine: trino
+    stable_views:
+      - iceberg.gold.vw_storm_impact_executive
+    example_query: >
+      SELECT "Data_Hora", "Zona_Leiria", "ID_Antena_Conectada", "Potencia_RSRP",
+             "Estado_Antena", "Telefones_Falha"
+      FROM iceberg.gold.network_quality_daily
+      WHERE "Estado_Antena" = FALSE;
+
+production:
+  orchestrator: flyte
+  workflow: jdpt_lakehouse_pipeline
+  task: build_gold_network_quality
+  trigger: manual
+  execution_model: static_rebuild
+  schedule: null
+  notes: >
+    Cenário académico TEAD: snapshot estático do período pós-tempestade (jan.–fev. 2026).
+    Pipeline disparado manualmente via Flyte; não há agendamento recorrente.
+  backfills:
+    supported: true
+    unit: full_pipeline_rerun
+
+lineage:
+  sources:
+    - iceberg.silver.network_logs
+    - iceberg.silver.towers
+    - iceberg.silver.call_tests
+
+observability:
+  quality_gate: avaliar_gold
+  alerts:
+    - type: pipeline_failure
+      notify: "#noc-data-alerts"
+
+references:
+  contract_file: v2/Contrato A - gold.network_quality_daily.txt
+  based_on_product: v1/Produto A - gold.network_quality_daily.txt

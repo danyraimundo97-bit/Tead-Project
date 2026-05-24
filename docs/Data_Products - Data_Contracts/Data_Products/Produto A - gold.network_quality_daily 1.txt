@@ -1,0 +1,70 @@
+# ================ #
+# DATA PRODUCT A   #
+# Versão activa: v1.0.0 — ver v1/ e histórico v0/
+# Alinhamento operacional (batch estático): v2/ (v1.1.0) — ver COMPARACAO_v1_v2.md
+# ================ #
+
+# Produto A: Dashboard de Qualidade de Rede
+# Grão: 1 linha por antena (torre) por dia
+# Tabela: iceberg.gold.network_quality_daily
+
+product:
+  id: gold.network_quality_daily
+  layer: gold
+  domain: network_operations
+  owner:
+    team: noc-engineering
+    contact: noc@jdpt.pt
+  description: >
+    Métricas diárias de condições de rádio, testes de chamada agregados por torre
+    e estado físico das infraestruturas em Leiria (pós-tempestade).
+  consumers:
+    - name: bi.infrastructure_map
+      type: bi
+      access: trino_sql
+    - name: superset.network_quality_dashboard
+      type: bi
+      access: trino_sql
+
+delivery:
+  storage:
+    system: minio
+    format: iceberg
+    bucket: warehouse
+    table_identifier: iceberg.gold.network_quality_daily
+    partitions:
+      - day("Data_Hora")
+    update_mode: acid_replace
+  serving:
+    query_engine: trino
+    stable_views:
+      - iceberg.gold.vw_storm_impact_executive
+    example_query: >
+      SELECT "Data_Hora", "Zona_Leiria", "ID_Antena_Conectada", "Potencia_RSRP",
+             "Estado_Antena", "Telefones_Falha"
+      FROM iceberg.gold.network_quality_daily
+      WHERE "Estado_Antena" = FALSE;
+
+production:
+  orchestrator: flyte
+  workflow: jdpt_lakehouse_pipeline
+  task: build_gold_network_quality
+  schedule: "0 3 * * *"
+  backfills:
+    supported: true
+    unit: day
+
+lineage:
+  sources:
+    - iceberg.silver.network_logs
+    - iceberg.silver.towers
+    - iceberg.silver.call_tests
+
+observability:
+  quality_gate: avaliar_gold
+  alerts:
+    - type: freshness_breach
+      notify: "#noc-data-alerts"
+
+references:
+  contract_file: v1/Contrato A - gold.network_quality_daily.txt

@@ -3,6 +3,7 @@ from flytekit import ImageSpec, task
 
 from flyte_task_env import TASK_ENV
 from workflow_functions.loki_logging import get_logger
+from workflow_functions.trino_acid import replace_table_transaction_multi_insert
 
 logger = get_logger(__name__)
 
@@ -122,9 +123,7 @@ def build_gold_churn_risk() -> str:
             )
         logger.info("Silver CDR rows: %s", n_cdr)
 
-        logger.info("Truncating gold.churn_risk_daily for full rebuild")
-        cur.execute("TRUNCATE TABLE iceberg.gold.churn_risk_daily")
-        cur.fetchall()
+        logger.info("Replacing gold.churn_risk_daily (ACID full batch)")
 
         cur.execute(_snapshot_dates_sql())
         raw_dates = [row[0] for row in cur.fetchall()]
@@ -144,10 +143,15 @@ def build_gold_churn_risk() -> str:
             _assert_churn_columns_sane(cur, context="After churn rebuild (no dates)")
             return "Gold churn_risk_daily empty (no activity dates in silver)"
 
-        for snapshot_date_sql in dates:
-            logger.debug("Churn gold INSERT Data_Referencia=%s", snapshot_date_sql)
-            cur.execute(_insert_one_snapshot_date(snapshot_date_sql=snapshot_date_sql))
-            cur.fetchall()
+        insert_sqls = [
+            _insert_one_snapshot_date(snapshot_date_sql=d) for d in dates
+        ]
+        replace_table_transaction_multi_insert(
+            conn,
+            table_fqn="iceberg.gold.churn_risk_daily",
+            insert_sqls=insert_sqls,
+            logger=logger,
+        )
 
         _assert_churn_columns_sane(cur, context="After INSERT churn_risk")
 

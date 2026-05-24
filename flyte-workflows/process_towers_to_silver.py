@@ -8,6 +8,7 @@ from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
 from workflow_functions.silver_transforms import transform_towers_silver_features
+from workflow_functions.trino_acid import replace_table_transaction
 
 logger = get_logger(__name__)
 
@@ -212,11 +213,10 @@ def process_towers_to_silver() -> str:
         )
         cur.fetchall()
 
-        cur.execute("TRUNCATE TABLE iceberg.silver.towers")
-        cur.fetchall()
-
-        cur.execute(
-            """
+        replace_table_transaction(
+            conn,
+            table_fqn="iceberg.silver.towers",
+            insert_sql="""
             INSERT INTO iceberg.silver.towers (
                 silver_row_id, mcc, net, area, cell, unit, lon, lat, range_m, samples,
                 changeable, created, updated, average_signal, snapshot_date, status,
@@ -231,9 +231,9 @@ def process_towers_to_silver() -> str:
                 radio_ohe_gsm, radio_ohe_umts, radio_ohe_lte, radio_ohe_nr,
                 radio_ohe_cdma, radio_ohe_other
             FROM hive.staging.temp_towers
-            """
+            """,
+            logger=logger,
         )
-        cur.fetchall()
 
         cur.execute("DROP TABLE hive.staging.temp_towers")
         cur.fetchall()

@@ -1,0 +1,619 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[portuguese]{babel}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{url}
+\usepackage{hyperref}
+
+\newcommand{\teadrepo}{https://github.com/danyraimundo97-bit/Tead-Project}
+
+\graphicspath{{figuras/}}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  language=SQL
+}
+
+\begin{document}
+
+\title{Projeto TEAD: Data Lakehouse para Análise de Impacto em Redes de Telecomunicações}
+
+\author{João Mendes 8250051 \and Dany Raimundo 8250047}
+
+\institute{Instituto Politécnico do Porto \\
+Mestrado em Engenharia Informática\\
+Tecnologias Escaláveis para Análise de Dados (TEAD)}
+
+\maketitle
+
+\noindent\textbf{Repositório do projeto:} \url{\teadrepo}
+
+\begin{abstract}
+Este documento apresenta a fundação do cenário hipotético da operadora "JDPT", detalhando o ecossistema analítico criado na camada \textit{Silver} de um \textit{Data Lakehouse}. O projeto foca-se no cruzamento da infraestrutura de rede, telemetria rádio e comportamento de faturação para avaliar o impacto de uma recente tempestade na região de Leiria, com o intuito de mitigar a taxa de abandono de clientes (\textit{Churn}) e orientar o investimento na gestão da rede e recuperação da infraestrutura.
+\end{abstract}
+
+
+
+
+\section{Enquadramento do Problema e Cenário Hipotético}
+
+
+\subsection{Contexto de Negócio: A Tempestade em Leiria}
+O presente projeto desenvolve-se em torno da \textbf{JDPT}, uma operadora hipotética de telecomunicações (ISP) a operar no mercado português. Recentemente, a região de Leiria foi assolada por uma tempestade de proporções destrutivas, caracterizada por ventos e inundações severas. Este evento climático extremo provocou a queda de dezenas de postes de alta tensão e o colapso de múltiplos \textit{sites} de telecomunicações (torres e antenas) na região.
+
+No rescaldo da tempestade, a \textbf{JDPT} deparou-se com uma crise operacional e comercial. Os canais de Apoio ao Cliente registaram um pico de reclamações por quebras de chamadas (\textit{drops}) e indisponibilidade de rede móvel (2G/3G/4G/5G). Os relatórios financeiros preliminares demonstram um aumento vertiginoso na taxa de cancelamento de contratos (\textbf{Churn Rate}).
+
+
+\subsection{O Desafio Analítico}
+A equipa de Gestão de Rede e a Direção de Retenção de Clientes enfrentam um problema de análise de dados após a catastrofe.
+\begin{itemize}
+    \item A faturação não sabe quais os clientes geograficamente afetados pela falha de infraestrutura.
+    \item Os engenheiros de rede tem registos de degradação de sinal, mas não consegue quantificar o impacto direto de uma torre caída.
+\end{itemize}
+
+A requalificação da infraestrutura exige um investimento de capital. No entanto, sem a análise dos dados, a empresa não sabe quais torres devem ser prioritariamente recuperadas para maximizar a retenção de clientes e restaurar o \textit{Mean Opinion Score} (MOS) da rede.
+
+
+\subsection{A Solução: Data Lakehouse Orientado a Produtos}
+Para resolver esta crise, a equipa de Engenharia de Dados propõe a construção de uma plataforma analítica escalável baseada numa arquitetura \textit{Medallion Lakehouse} (MinIO, Iceberg, Trino, Flyte). O objetivo é ingerir, limpar e cruzar quatro fontes de dados distintas:
+\begin{enumerate}
+    \item O inventário real de infraestruturas (OpenCelliD).
+    \item A telemetria passiva dos telemóveis afetados (Network Logs).
+    \item Os testes ativos de qualidade de voz (Call Tests).
+    \item O registo central de faturação e abandono (CDR).
+\end{enumerate}
+
+Com esta análise, a JDPT será capaz de isolar as zonas de Leiria mais críticas, prever o risco de \textit{Churn} introduzido pela tempestade e otimizar o planeamento de reparação da rede.
+
+%==============================================================================
+\section{Stack Tecnológica e Arquitetura do Sistema}
+%==============================================================================
+
+\subsection{Componentes e Justificação}
+
+Para o detalhe de cada componente, o respetivo papel arquitectural e a justificação da sua escolha, consulte o \hyperref[anexo:stack]{Anexo \ref*{anexo:stack} - Stack Tecnológica}.
+
+\subsection{Arquitectura Lógica}
+A Figura~\ref{fig:arch} ilustra a interligação entre ingestão, armazenamento, compute e camadas de consumo.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{img/Architecture.png}
+  \caption{Arquitectura de componentes da plataforma JDPT.}
+  \label{fig:arch}
+\end{figure}
+
+\newpage
+\section{Dicionário de Dados (Camada Silver)}
+
+Abaixo, detalha-se a semântica de cada conjunto de dados selecionado para o projeto.
+
+
+\subsection{Faturação e Retenção de Clientes}
+\textbf{Propósito:} Tabela de dimensão comercial que contém o histórico de consumo, faturação e a variável alvo de retenção (\textit{Churn}). Permite quantificar o impacto financeiro.
+
+Para consultar o detalhe das variáveis, consulte o \hyperref[anexo:dic_faturacao]{Anexo \ref*{anexo:dic_faturacao} - Dicionário de Dados de Faturação e Retenção}.
+
+
+\subsection{Telemetria Física de Rádio}
+\textbf{Propósito:} Tabela de factos contendo a telemetria rádio-frequência (\textit{Drive-Tests} passivos) dos dispositivos. Regista o impacto físico da tempestade na qualidade da rede.
+
+Para consultar o detalhe das variáveis, consulte o \hyperref[anexo:dic_telemetria]{Anexo \ref*{anexo:dic_telemetria} - Dicionário de Dados de Telemetria Física de Rádio}.
+
+\newpage
+
+
+\subsection{Testes de Qualidade e Experiência}
+\textbf{Propósito:} Registo de testes ativos na rede (\textit{Drive-Tests}) que quantificam a degradação temporal da ligação e a qualidade (MOS) resultante dos danos da tempestade.
+
+Para consultar o detalhe das variáveis, consulte o \hyperref[anexo:dic_testes]{Anexo \ref*{anexo:dic_testes} - Dicionário de Dados de Testes de Qualidade}.
+
+
+\subsection{Inventário de Infraestrutura}
+\textbf{Propósito:} Tabela de dimensão geográfica baseada em dados abertos (OpenCelliD). Mapeia as localizações físicas exatas das torres em Leiria para cruzar com as zonas de "sombra" (sem cobertura).
+
+Para consultar o detalhe das variáveis, consulte o \hyperref[anexo:dic_inventario]{Anexo \ref*{anexo:dic_inventario} - Dicionário de Dados de Inventário de Antenas}.
+
+
+
+\section{Transformação de Dados: Da Camada Bronze à Silver}
+
+De acordo com a metodologia CRISP-DM, a fase de \textit{Data Understanding} revelou que os dados originais (Camada \textit{Bronze}) apresentavam problemas típicos de qualidade: ruído, duplicação, formatos inconsistentes e isolamento entre fontes. A passagem para a camada \textit{Silver} consiste, em traços gerais, em:
+
+\begin{itemize}
+    \item \textbf{Normalizar nomes e tipos} de colunas (minúsculas, sem espaços, números reais em vez de texto com unidades).
+    \item \textbf{Limpar valores inválidos} --- duplicados, coordenadas em falta, decimais com vírgula --- e enviar para quarentena o que não passa nas regras.
+    \item \textbf{Codificar categorias} (tecnologia de rede, resultado de teste, estado de torre) em colunas booleanas para serem usadas directamente nas agregações.
+    \item \textbf{Atribuir um identificador interno} a cada linha (\texttt{silver\_row\_id}) e fixar \texttt{phone\_number} como chave comum entre faturação, telemetria e testes.
+    \item \textbf{Integrar e contextualizar} as fontes no cenário de Leiria, simulando a tempestade na zona afectada.
+\end{itemize}
+
+O detalhe exaustivo de cada transformação --- regras por dataset, problemas concretos encontrados na \textit{Bronze} e ajustes aplicados --- está no documento de apoio referenciado no \hyperref[anexo:silver_cleanup]{Anexo \ref*{anexo:silver_cleanup}}.
+
+
+\section{Transformação de Dados: Da Camada Silver à Gold}
+
+Na fase de \textit{Data Preparation} do CRISP-DM, a camada \textit{Silver} fornece tabelas limpas e alinhadas semanticamente, mas ainda orientadas a engenharia de dados. A passagem para a camada \textit{Gold} agrega, enriquece e expõe \textit{Data Products} prontos para consumo em BI e ML, governados por contratos versionados (v1.0.0). Em traços gerais:
+
+\begin{itemize}
+    \item \textbf{Nomes em linguagem de negócio} (\texttt{Telefone}, \texttt{Receita\_Em\_Risco}, \texttt{Estado\_Antena}) em vez de identificadores técnicos da \textit{Silver}.
+    \item \textbf{Grão fixo por tabela} --- torre $\times$ dia civil no Produto~A; cliente $\times$ dia no Produto~B.
+    \item \textbf{Cruzamento geográfico e temporal} --- atribuição Haversine de logs à torre mais próxima, zoneamento de Leiria em quadrantes e marcação de clientes expostos à tempestade.
+    \item \textbf{Agregações com filtros 3GPP} para médias de RSRP, RSRQ, SINR e \textit{downlink}, excluindo \textit{outliers} fora de intervalos plausíveis.
+    \item \textbf{Carga ACID em substituição total}, \textit{partitioning} Iceberg por dia e disponibilidade após conclusão bem-sucedida do pipeline \textit{batch} (snapshot estático, sem agendamento recorrente).
+\end{itemize}
+
+
+\subsection{Produto A --- Qualidade de Rede (\texttt{gold.network\_quality\_daily})}
+
+\textbf{Propósito:} \textit{Dashboard} de qualidade de rede para o NOC e a Engenharia de Rede, com uma linha por torre e por dia civil.
+
+\textbf{Fontes \textit{Silver}:} \texttt{network\_logs}, \texttt{towers}, \texttt{call\_tests}.
+
+Após deduplicar torres por célula física, cada registo de telemetria é atribuído à torre mais próxima (distância Haversine). A matriz torres $\times$ dia garante que antenas sem actividade permanecem visíveis com contagens zero. Cruzam-se testes de voz (\textit{drive-tests}) por telefone e dia; derivam-se médias filtradas 3GPP, o quadrante \texttt{Zona\_Leiria} e KPIs como \textit{drop rate} proxy e torres com sinal degradado.
+
+Para o esquema completo, regras de agregação e KPIs derivados, consulte o \hyperref[anexo:gold_build]{Anexo \ref*{anexo:gold_build} - Documento de Construção da Camada Gold}.
+
+
+\subsection{Produto B --- Risco de Churn (\texttt{gold.churn\_risk\_daily})}
+
+\textbf{Propósito:} Painel de retenção para a Direção de Marketing e Faturação, com uma linha por cliente e por dia de referência.
+
+\textbf{Fontes \textit{Silver}:} \texttt{cdr\_customers}, \texttt{call\_tests}, \texttt{network\_logs}.
+
+Para cada dia com actividade em testes ou telemetria, gera-se uma linha por cliente do CDR, enriquecida com \textit{drops} e MOS médio (\texttt{call\_tests}) e com o indicador \texttt{Afetado\_Tempestade} quando o cliente registou logs na zona Este de Leiria. Expõe-se a receita diária em risco (\texttt{Receita\_Em\_Risco}), a variável alvo \texttt{Desistencia} e métricas de frustração para segmentação e modelação preditiva.
+
+Para o esquema completo, estratégia de carga \textit{chunked} e KPIs derivados, consulte o \hyperref[anexo:gold_build]{Anexo \ref*{anexo:gold_build} - Documento de Construção da Camada Gold}.
+
+
+\section{Garantia de Qualidade, Data Contracts e Fiabilidade de Execução}
+\label{sec:qa}
+
+Para além das transformações descritas nas secções anteriores, o projecto implementa verificações automáticas alinhadas com os \textbf{Data Contracts} (v1.0.0): documentos que fixam o \textit{schema}, o grão de cada produto, intervalos válidos para métricas, regras de unicidade e decisões de \textbf{entrega} (particionamento, modo de actualização ACID, partições temporais). Estas verificações correm dentro dos \textit{workflows} Flyte --- sobretudo nas \textit{tasks} de limpeza \textit{Silver}, em \texttt{avaliar\_silver} e \texttt{avaliar\_gold} --- e complementam o que já está definido nos contratos em \texttt{quality.constraints} e \texttt{delivery}.
+
+\subsection{O que verificamos}
+
+\begin{itemize}
+    \item \textbf{Conformidade de \textit{schema}} --- antes da carga, garante-se que as tabelas Iceberg existem com a estrutura acordada; na leitura dos CSV \textit{bronze}, a ausência de colunas esperadas interrompe o pipeline; após a \textit{Silver}, confirma-se a tipagem de campos críticos (\textit{e.g.} estado booleano das torres).
+    \item \textbf{Unicidade} --- no CDR exige-se uma linha por cliente; nos produtos \textit{Gold}, o grão contratual (torre $\times$ dia; telefone $\times$ dia) é validado por volumetria e chaves sem \texttt{NULL}; no \textit{streaming}, evita-se duplicação por identificador de evento.
+    \item \textbf{Intervalos plausíveis (\textit{ranges})} --- RSRP e MOS são confrontados com limites de engenharia de RF e de voz; na \textit{Gold}, médias agregadas excluem \textit{outliers} fora dos intervalos 3GPP (Produto~A).
+    \item \textbf{Taxa de valores inválidos} --- em cada domínio \textit{Silver}, a limpeza numérica mede quantos valores brutos ficaram irreconhecíveis após normalização. Se essa fração ultrapassar \textbf{5\,\%} numa coluna, o pipeline falha (\textit{circuit breaker}), sinalizando corrupção massiva do ficheiro e não ruído pontual. Complementarmente, audita-se a proporção de datas/horas não convertidas e de chaves nulas nas tabelas finais.
+    \item \textbf{Quarentena} --- registos pontualmente inválidos \textbf{não} entram na tabela \textit{Silver} principal: são isolados em tabelas de quarentena (\texttt{*\_quarantine\_raw}), com trilho de auditoria (\texttt{*\_quarantine\_audit}) que regista ficheiro, linha e motivo da rejeição. Assim distinguimos \emph{ruído local} (algumas linhas rejeitadas) de \emph{falha sistémica} (limiar de 5\,\% que bloqueia todo o lote).
+\end{itemize}
+
+O detalhe por momento do pipeline \textit{batch} encontra-se no \hyperref[anexo:qa_checks]{Anexo \ref*{anexo:qa_checks} - Verificações de Qualidade}.
+
+Se uma verificação crítica falhar --- sobretudo o \textit{circuit breaker} ou um \textit{assert} na carga \textit{Gold} --- o \textit{workflow} interrompe-se e, graças às transacções ACID, os consumidores BI mantêm o \textit{snapshot} anterior intacto. O detalhe das regras por dataset na \textit{Silver} (incluindo quarentena) está no \hyperref[anexo:silver_cleanup]{Anexo \ref*{anexo:silver_cleanup}}; as regras contratuais dos produtos \textit{Gold} encontram-se em \texttt{docs/Data\_Products - Data\_Contracts/}.
+
+
+\subsection{Retries, particionamento e desempenho analítico}
+
+Os contratos descrevem \emph{o que} se entrega; as decisões abaixo descrevem \emph{como} essa entrega permanece fiável e eficiente num \textit{lakehouse} Iceberg + Trino.
+
+\textbf{Retries e reprocessamento seguro.}
+No \textit{streaming}, falhas transitórias (rede, Trino ocupado) são tratadas com reexecução automática das \textit{tasks} Flyte e novas tentativas nas consultas SQL; o emissor Kafka usa entrega confirmada e publicação idempotente, de modo a que duplicados simulados ou \textit{retries} não corrompam a \textit{bronze}.
+
+\textbf{Particionamento e \textit{partition pruning}.}
+Os produtos \textit{Gold} estão particionados por dia civil (\texttt{Data\_Hora} no Produto~A; \texttt{Data\_Referencia} no Produto~B), conforme documentado nos contratos. Filtros temporais típicos dos \textit{dashboards} --- ``última semana'', ``dia X da tempestade'' --- limitam a leitura às partições relevantes, reduzindo custo no Trino sem exigir que o analista conheça a coluna técnica de partição.
+
+\textbf{Redução de \textit{shuffle} e mitigação de \textit{skew}.}
+O motor SQL move muito volume nos \textit{joins} e agregações. No Produto~A, deduplicam-se torres antes de atribuir cada log à antena mais próxima (Haversine), evitando multiplicar a mesma célula física; os testes de voz são pré-agregados por telefone e dia antes do cruzamento com a matriz torre$\times$dia. No Produto~B, a carga processa \textbf{dia a dia} dentro de uma única transacção, limitando picos de memória quando muitos clientes têm actividade no mesmo período --- mitigação prática de desequilíbrio (\textit{skew}) sem \textit{salting} explícito. O join log$\times$todas as torres continua, por desenho académico, a operação mais pesada do projecto.
+
+\textbf{Materialização \textit{vs.} \textit{query-on-read}.}
+Os \textit{Data Products} contratados (Produtos A e B) são \textbf{tabelas materializadas}: o custo dos \textit{joins} e agregações é pago uma vez por execução \textit{batch}, e o Superset consulta um \textit{snapshot} estável. Complementarmente, existe uma \textbf{vista semântica} executiva que cruza qualidade de rede e risco de \textit{churn} \emph{sem duplicar} armazenamento --- a lógica corre no Trino (\textit{query-on-read}) e reflecte sempre o último \textit{snapshot} gold disponível após o pipeline.
+
+O mapa consolidado destas práticas --- batch \textit{vs.} streaming, e ligação aos contratos --- encontra-se no \hyperref[anexo:exec_engineering]{Anexo \ref*{anexo:exec_engineering} - Engenharia de Execução}.
+
+
+\section{Fluxos de Dados e Orquestração (Flyte)}
+
+A plataforma JDPT não depende de scripts isolados executados manualmente. Todo o percurso dos dados --- desde a preparação das camadas até à entrega dos \textit{Data Products} --- está coordenado pelo \textbf{Flyte}, um orquestrador de \textit{workflows} que garante ordem de execução, repetibilidade e registo de cada passo. Em termos práticos, o Flyte funciona como o ``maestro'' da operação: define quem corre, em que ordem, e o que acontece se algo falhar a meio.
+
+
+\subsection{Workflows e Tasks}
+
+Um \textbf{\textit{workflow}} é o plano completo de processamento; cada \textbf{\textit{task}} é uma unidade de trabalho dentro desse plano (por exemplo, limpar a faturação ou construir o painel de \textit{churn}). As \textit{tasks} foram desenhadas de forma modular: cada uma trata de um domínio de dados (faturação, telemetria, testes de voz, torres) ou de uma responsabilidade transversal (preparar o ambiente, validar qualidade).
+
+Na JDPT existem dois percursos principais, complementares entre si:
+
+\begin{itemize}
+    \item \textbf{Pipeline \textit{batch}} (\texttt{jdpt\_lakehouse\_pipeline}) --- reconstrói, de forma completa e sob pedido, as camadas \textit{Silver} e \textit{Gold} a partir dos ficheiros históricos no armazenamento, produzindo um \textbf{snapshot estático} dos dois \textit{Data Products} (qualidade de rede e risco de \textit{churn}) para consumo em \textit{dashboards}.
+    \item \textbf{Pipeline \textit{streaming}} (\texttt{jdpt\_streaming\_full\_sync}) --- processa, em janelas curtas, eventos de telemetria em tempo quase real, oferecendo visibilidade rápida ao NOC enquanto o \textit{batch} mantém a análise histórica consolidada do cenário.
+\end{itemize}
+
+Entre as \textit{tasks} transversais destacam-se três grupos:
+
+\begin{enumerate}
+    \item \textbf{Preparação de ambiente} --- assegura que o armazenamento, as tabelas Iceberg e os esquemas necessários existem antes de qualquer transformação.
+    \item \textbf{Transformação por domínio} --- quatro \textit{tasks} em paralelo na \textit{Silver} (faturação, \textit{logs}, testes, torres) e duas em paralelo na \textit{Gold} (qualidade de rede e \textit{churn}).
+    \item \textbf{Validação de qualidade} --- \textit{gates} entre camadas (\texttt{avaliar\_silver}, \texttt{avaliar\_gold}) e verificações embutidas na limpeza e na carga \textit{Gold}; ver Secção~\ref{sec:qa}.
+\end{enumerate}
+
+Esta separação reflecte a filosofia \textit{Medallion}: cada camada só avança quando a anterior cumpre o contrato de qualidade acordado.
+
+
+\subsection{Fluxo Batch}
+
+O fluxo \textit{batch} é o motor que alimenta os relatórios de faturação, os mapas de torres degradadas e os painéis de retenção de clientes. Percorre, numa única execução, todo o histórico disponível na \textit{bronze} e materializa o estado final das tabelas \textit{Silver} e \textit{Gold}.
+
+O percurso segue uma sequência lógica em cinco fases:
+
+\begin{enumerate}
+    \item \textbf{Preparação da camada \textit{Silver}} --- confirma que os ficheiros \textit{bronze} estão disponíveis no armazenamento e que as tabelas de destino existem.
+    \item \textbf{Limpeza e integração (em paralelo)} --- quatro fluxos independentes leem os CSV \textit{bronze}, aplicam normalização, deduplicação, quarentena e \textit{circuit breaker} (Secção~\ref{sec:qa}), e carregam as tabelas \textit{Silver}. A execução em paralelo reduz o tempo total sem sacrificar isolamento: uma falha na faturação não bloqueia a limpeza das torres.
+    \item \textbf{Auditoria \textit{Silver}} --- \texttt{avaliar\_silver} valida unicidade, intervalos (RSRP, MOS) e integridade temporal antes do avanço para a \textit{Gold}.
+    \item \textbf{Construção dos \textit{Data Products} (em paralelo)} --- duas \textit{tasks} constroem, em simultâneo, o painel de qualidade de rede (torre $\times$ dia) e o painel de risco de \textit{churn} (cliente $\times$ dia), cruzando telemetria, testes de voz, torres e faturação.
+    \item \textbf{Auditoria \textit{Gold}} --- confirma que as tabelas finais têm volumetria coerente (por exemplo, matriz torres $\times$ dias completa) e que indicadores da tempestade (antenas caídas, clientes afectados) estão presentes como esperado.
+\end{enumerate}
+
+\begin{figure}[ht]
+  \centering
+  % Coloque o nome do ficheiro dentro das chavetas (pode omitir a extensão .png)
+  \includegraphics[width=\linewidth]{img/batch-jdpt_lakehouse_pipeline.png}
+  
+  \caption{Orquestração \textit{batch} JDPT (Flyte) --- Equivalente operacional: pipeline \texttt{jdpt\_lakehouse\_pipeline}.}
+  \label{fig:bpmn-batch}
+\end{figure}
+
+Operacionalmente, este fluxo \textbf{não está agendado}: é disparado manualmente via Flyte quando se pretende (re)construir o snapshot analítico --- por exemplo, após corrigir regras de transformação ou reprocessar os dados da tempestade. Cada execução substitui, de forma controlada e atómica, o conteúdo das tabelas \textit{Silver} e \textit{Gold}, evitando estados intermédios inconsistentes visíveis nos \textit{dashboards}.
+
+
+\subsection{Fluxo Streaming}
+
+O fluxo \textit{streaming} cobre a monitorização de curto prazo da rede. Enquanto o \textit{batch} materializa um retrato completo e estático do cenário, o \textit{streaming} dá ao Centro de Operações de Rede (NOC) uma janela deslizante sobre a telemetria mais recente --- potência de sinal, ruído, localização.
+
+O percurso é mais curto e repetido com frequência:
+
+\begin{enumerate}
+    \item \textbf{Emissão de eventos} --- um simulador envia, de forma contínua, medições de rede (como se fossem telemóveis reais a reportar qualidade de sinal na zona de Leiria) para uma fila de mensagens (Redpanda, compatível com Kafka).
+    \item \textbf{Bronze \textit{streaming}} --- cada evento recebido é registado na camada \textit{bronze} sem duplicar registos já processados; reenvios ou falhas de rede não corrompem os dados.
+    \item \textbf{Silver \textit{streaming}} --- os eventos passam por regras de limpeza (validação de telefone, coordenadas, intervalos de sinal) e ficam disponíveis numa tabela \textit{Silver} deduplicada, com um marcador temporal que indica até onde o pipeline já processou.
+    \item \textbf{Gold horária} --- os eventos recentes são agregados por hora e tipo de rede, produzindo indicadores como média de RSRP e contagem de sinais fracos --- úteis para detectar degradação nas horas que se seguem à queda de uma torre.
+\end{enumerate}
+
+\begin{figure}[ht]
+  \centering
+  % Substitua 'diagrama_bpmn_streaming' pelo nome exato do seu ficheiro PNG (sem o .png)
+  \includegraphics[width=\linewidth]{img/streaming-jdpt_streaming_full_sync.png}
+  
+  \caption{Orquestração \textit{streaming} JDPT (Flyte) --- Equivalente operacional: pipeline \texttt{jdpt\_streaming\_full\_sync}.}
+  \label{fig:bpmn-streaming}
+\end{figure}
+
+Importa sublinhar que o \textit{streaming} \textbf{não substitui} o \textit{batch}: os \textit{Data Products} oficiais (Produto~A e Produto~B) continuam a ser alimentados pelo fluxo \textit{batch}, que integra as quatro fontes históricas com a profundidade analítica necessária (Haversine, simulação da tempestade, cruzamento com faturação). O \textit{streaming} complementa a operação com um radar de curto prazo para o NOC.
+
+Em ambos os fluxos, falhas parciais são tratadas de forma segura: o \textit{batch} reverte alterações incompletas (preservando a versão anterior dos dados), e o \textit{streaming} reprocessa apenas a janela recente sem duplicar eventos, graças a identificadores únicos por ocorrência.
+
+
+\section{Observabilidade Operacional}
+\label{sec:observability}
+
+Além dos \textit{Data Products} consumidos em BI, a JDPT precisa de saber se os pipelines estão saudáveis --- sobretudo no ramo \textit{streaming}, onde a telemetria entra de forma contínua e o NOC depende de indicadores actualizados nas horas seguintes a uma queda de torre. A observabilidade do projecto responde a duas perguntas complementares: \emph{``o processamento histórico (\textit{batch}) concluiu com dados fiáveis?''} e \emph{``a rede está a reportar eventos em tempo útil?''}
+
+
+\subsection{Dois níveis de visibilidade}
+
+\textbf{Pipeline \textit{batch}.}
+Cada execução manual do \texttt{jdpt\_lakehouse\_pipeline} deixa rasto no Flyte (estado de cada \textit{task}, duração, falhas) e em registos centralizados. Quando um \textit{gate} de qualidade bloqueia o avanço (Secção~\ref{sec:qa}) --- por exemplo, o \textit{circuit breaker} a 5\,\% ou uma auditoria \textit{Gold} inconclusiva --- a equipa identifica rapidamente \textbf{qual} domínio falhou e \textbf{em que fase}, sem inspeccionar ficheiros no armazenamento.
+
+\textbf{Pipeline \textit{streaming}.}
+O percurso emissor $\rightarrow$ fila de mensagens (Redpanda) $\rightarrow$ camadas \textit{bronze}, \textit{silver} e \textit{gold} horária exige acompanhamento \textbf{contínuo}: volume de eventos publicados, eventos efectivamente ingeridos, linhas rejeitadas na limpeza e agregações horárias produzidas. Este ramo alimenta o ``radar'' de curto prazo do NOC; a observabilidade confirma que o simulador (ou, num cenário real, os terminais) e o pipeline Flyte avançam ao mesmo ritmo.
+
+
+\subsection{Registos centralizados (Loki e Grafana)}
+
+Todos os componentes relevantes --- simulador de telemetria, \textit{tasks} Flyte de ingestão e transformação, auditoria \textit{streaming} --- enviam mensagens de log para um repositório comum (\textbf{Loki}), explorável no \textbf{Grafana}. Em vez de métricas isoladas por servidor, adoptámos um modelo \textbf{centrado em narrativa operacional}: cada mensagem indica o que aconteceu (arranque, progresso, conclusão, alerta), em que etapa do fluxo, e com contagens legíveis (\textit{e.g.} quantos eventos novos entraram, quantos foram descartados).
+
+Isto permite à equipa de dados e ao NOC:
+
+\begin{itemize}
+    \item Confirmar que o emissor está activo e a publicar medições de rede na zona de Leiria.
+    \item Verificar, após cada execução \textit{streaming}, se a ingestão trouxe eventos \textbf{novos} ou apenas reprocessou duplicados já conhecidos.
+    \item Detectar \textbf{atrasos ou buracos} --- eventos que chegaram à \textit{bronze} mas ainda não aparecem na \textit{Silver} (incluindo os rejeitados por regras de limpeza).
+    \item Comparar o ritmo de emissão com o ritmo de processamento, identificando filas ou execuções Flyte demasiado espaçadas.
+    \item Receber \textbf{alertas de qualidade} no ramo \textit{streaming} (duplicados indevidos, eventos ``órfãos'' nas últimas 24\,h) através de uma verificação opcional dedicada, sem bloquear o pipeline principal.
+\end{itemize}
+
+No Grafana, a exploração resume-se a filtrar logs por \textbf{componente} (emissão, ingestão, limpeza, agregação horária, auditoria) e por \textbf{tipo de evento} (arranque, carga concluída, aviso). Gráficos simples de volume ao longo do tempo ajudam a correlacionar picos de telemetria com degradação horária na \textit{Gold} --- a pergunta prática do NOC após queda de uma torre.
+
+
+\subsection{Consumo analítico vs.\ monitorização}
+
+Convém distinguir dois usos finais:
+
+\begin{itemize}
+    \item \textbf{Superset} (e consultas Trino) --- consomem os \textit{Data Products} \textit{batch} (Produtos A e B) e \textit{dashboards} de negócio: mapas de torres, receita em risco, \textit{churn}.
+    \item \textbf{Grafana + Loki} --- monitorizam a \textbf{saúde dos pipelines}, sobretudo \textit{streaming}; não substituem os painéis gold, mas explicam \emph{porque} um indicador horário pode estar desactualizado ou vazio.
+\end{itemize}
+
+O detalhe das etapas instrumentadas encontra-se no \hyperref[anexo:obs_streaming]{Anexo \ref*{anexo:obs_streaming} - Observabilidade do Streaming}. A ordem operacional recomendada mantém-se: preparar as tabelas de destino, arrancar o emissor de telemetria e executar o \textit{workflow} \texttt{jdpt\_streaming\_full\_sync}, assegurando que os registos cobrem todo o intervalo que se pretende analisar.
+
+
+\clearpage
+\appendix
+
+% --- ANEXO A ---
+\section{Stack Tecnológica}
+\label{anexo:stack}
+
+\begin{table}[ht]
+\centering
+\caption{Stack tecnológica e papel arquitectural.}
+\label{tab:stack}
+\renewcommand{\arraystretch}{1.15}
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Componente} & \textbf{Papel} & \textbf{Justificação} \\
+\midrule
+MinIO & Object storage S3 & Separação \textit{compute/storage}; \\
+Iceberg + Hive Metastore & Formato de tabela & ACID, evolução de \textit{schema} \\
+Trino & Motor SQL federado & Consultas sobre Iceberg e catálogo \texttt{kafka} sem cópias \\
+Flyte & Orquestração & DAGs reprodutíveis, \textit{retries}, \textit{ImageSpec} \\
+Docker Compose & Contentorização & Ambiente reprodutível para desenvolvimento e entrega \\
+Redpanda & \textit{Streaming} & Micro-batch para telemetria NOC\\
+Loki + Grafana & Observabilidade & Logs operacionais dos \textit{pipelines} \\
+Apache Superset & BI / Dashboards & Consumo analítico dos produtos gold via Trino \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO B ---
+\section{Dicionário de Dados de Faturação e Retenção}
+\label{anexo:dic_faturacao}
+
+Neste anexo apresenta-se a tabela de dimensão comercial que contém o histórico de consumo, faturação e a variável alvo de retenção (\textit{Churn}).
+
+\begin{table}[ht]
+\centering
+\caption{Dicionário de Dados - Faturação e Retenção}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Nome da Coluna} & \textbf{Tipo} & \textbf{Descrição Semântica / Negócio} \\
+\midrule
+Phone Number & String & [Chave Primária] Identificador único do cliente. \\
+Account Length & Integer & Antiguidade do cliente (em dias). \\
+VMail Message & Integer & Número total de mensagens de correio de voz recebidas. \\
+Day/Eve/Night Mins & Float & Minutos consumidos por período (Dia, Tarde, Noite, Internacional). \\
+Day/Eve/Night Calls & Integer & Quantidade de chamadas efetuadas por período. \\
+Day/Eve/Night Charge & Float & Valor faturado ao cliente em cada período. \\
+CustServ Calls & Integer & Número de contactos para o Apoio ao Cliente. \\
+Churn & Boolean & [Variável Alvo] True se o cliente cancelou o contrato. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO C ---
+\section{Dicionário de Dados de Telemetria Física de Rádio}
+\label{anexo:dic_telemetria}
+
+\begin{table}[ht]
+\centering
+\caption{Dicionário de Dados - Telemetria Física de Rádio}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Nome da Coluna} & \textbf{Tipo} & \textbf{Descrição Semântica / Negócio} \\
+\midrule
+Timestamp & Datetime & Data e hora exata da ocorrência na rede. \\
+DeviceID & String & Identificador do hardware que registou a anomalia. \\
+deviceMake / Model & String & Marca e modelo do equipamento do utilizador (ex: Samsung S22). \\
+NetworkType & String & Geração da rede servidora (ex: LTE (4G) / 5G). \\
+RSRP & Float & Reference Signal Received Power (dBm). Mede a potência do sinal de rádio. \\
+RSRQ & Float & Reference Signal Received Quality (dB). Mede a qualidade do sinal de rádio. \\
+SINR & Float & Interferência e Ruído. Valores nulos/negativos indicam falhas no sinal. \\
+PCI & Float & Physical Cell ID. Identificador físico da antena conectada. \\
+Downlink / Uplink & Float & Velocidade real de transferência de dados (\textit{Throughput} em Mbps). \\
+Lat\_PT / Lon\_PT & Float & Coordenadas GPS da ocorrência, transladadas para o polígono de Leiria. \\
+Phone\_Number & String & [Chave Estrangeira] Relaciona o registo físico de rede ao cliente no CDR. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO D ---
+\section{Dicionário de Dados de Testes de Qualidade}
+\label{anexo:dic_testes}
+
+\begin{table}[ht]
+\centering
+\caption{Dicionário de Dados - Testes de Qualidade}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Nome da Coluna} & \textbf{Tipo} & \textbf{Descrição Semântica / Negócio} \\
+\midrule
+Date Of Test & Datetime & Data e hora de início do teste de chamada. \\
+Signal (dBm) & Float & Força do sinal medido no instante da chamada. \\
+Distance from site & Float & Distância (em metros) entre o cliente e a torre (relevante para \textit{handovers}). \\
+Call Test Result & String & Resultado final (ex: SUCCESS ou DROP por falha de sinal). \\
+Call Test Setup Time & Float & Latência (segundos) necessária para estabelecer a comunicação. \\
+MOS & Float & Mean Opinion Score (1 a 5). Índice da qualidade áudio percebida. \\
+Phone\_Number & String & [Chave Estrangeira] Relaciona o teste de qualidade a um cliente faturado. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO E ---
+\section{Dicionário de Dados de Inventário de Antenas}
+\label{anexo:dic_inventario}
+
+\begin{table}[ht]
+\centering
+\caption{Dicionário de Dados - Inventário de Antenas}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Nome da Coluna} & \textbf{Tipo} & \textbf{Descrição Semântica / Negócio} \\
+\midrule
+radio & String & Geração da tecnologia de rádio (ex: GSM, UMTS, LTE). \\
+mcc & Integer & Código do País (268=PT) \\
+net & Integer & Código da Operadora \\
+area & Integer & Location Area Code (LAC)\\
+cell & Integer & Identificador único da Célula \\
+lat / lon & Float & Coordenadas geográficas exatas da antena \\
+range & Integer & Raio de cobertura projetado (em metros) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO F ---
+\section{Documento de Limpeza da Camada Silver}
+\label{anexo:silver_cleanup}
+
+O detalhe completo das transformações aplicadas na passagem da camada \textit{Bronze} para a camada \textit{Silver} --- regras de normalização, problemas específicos de cada dataset (CDR, \textit{network\_logs}, \textit{call\_tests}, \textit{towers}) e simulação da tempestade --- encontra-se no documento de apoio:
+
+\begin{center}
+\href{\teadrepo/blob/main/docs/Relat%C3%B3rio/Ficheiro%20de%20limpeza%20da%20camada%20silver.md}%
+{\texttt{docs/Relatório/Ficheiro de limpeza da camada silver.md}}\\
+\small\url{\teadrepo}
+\end{center}
+
+\clearpage
+
+% --- ANEXO G ---
+\section{Documento de Construção da Camada Gold}
+\label{anexo:gold_build}
+
+O detalhe completo da construção dos \textit{Data Products} da camada \textit{Gold} --- fontes \textit{Silver}, \textit{joins} (incluindo deduplicação de torres e atribuição Haversine), regras de agregação (filtros 3GPP, zoneamento de Leiria, cruzamento com testes de voz e CDR), esquema completo das tabelas \texttt{gold.network\_quality\_daily} e \texttt{gold.churn\_risk\_daily}, KPIs derivados e estratégia de carga ACID --- encontra-se no documento de apoio:
+
+\begin{center}
+\href{\teadrepo/blob/main/docs/Relat%C3%B3rio/Ficheiro%20de%20constru%C3%A7%C3%A3o%20da%20camada%20gold.md}%
+{\texttt{docs/Relatório/Ficheiro de construção da camada gold.md}}\\
+\small\url{\teadrepo}
+\end{center}
+
+\clearpage
+
+% --- ANEXO H ---
+\section{Verificações de Qualidade}
+\label{anexo:qa_checks}
+
+Resumo dos momentos de verificação de qualidade no pipeline \textit{batch} (Secção~\ref{sec:qa}).
+
+\begin{table}[ht]
+\centering
+\caption{Momentos de verificação de qualidade no pipeline \textit{batch}.}
+\label{tab:qa-checks}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Momento} & \textbf{Verificações principais} \\
+\midrule
+Limpeza \textit{Bronze}$\rightarrow$\textit{Silver} &
+\textit{Schema} (colunas presentes); \textit{circuit breaker} de taxa de inválidos (5\,\%); quarentena de linhas rejeitadas; deduplicação CDR. \\
+\addlinespace
+Gate \texttt{avaliar\_silver} &
+Unicidade CDR; \textit{ranges} RSRP/MOS; taxa de \textit{timestamps} parseados; tipagem. \\
+\addlinespace
+Construção \textit{Gold} &
+Filtros 3GPP nas agregações; validação pós-carga de colunas críticas (antena, \textit{churn}). \\
+\addlinespace
+Auditoria \texttt{avaliar\_gold} &
+Volumetria (matriz torre$\times$dia); \texttt{NULL}s em chaves; presença de indicadores da tempestade (antenas \textit{down}). \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO I ---
+\section{Observabilidade do Streaming}
+\label{anexo:obs_streaming}
+
+Resumo das etapas monitorizadas no ramo \textit{streaming} (Secção~\ref{sec:observability}). Cada linha indica \textbf{que pergunta operacional} o registo de logs permite responder.
+
+\begin{table}[ht]
+\centering
+\caption{Etapas instrumentadas no percurso de telemetria em tempo quase real.}
+\label{tab:obs-kafka}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Etapa} & \textbf{O que fica visível / pergunta operacional} \\
+\midrule
+Emissão de eventos &
+O simulador arrancou? Quantas medições foram publicadas (sinal, telefone, duplicados simulados)? \\
+\addlinespace
+Ingestão \textit{bronze} &
+Quantos eventos a fila continha nesta execução? Quantos eram novos vs.\ já conhecidos? A carga terminou com sucesso? \\
+\addlinespace
+Limpeza \textit{Silver} &
+Quantos eventos passaram as regras de validação? O pipeline reprocessou a janela recente (marca de água + margem de 1\,h)? \\
+\addlinespace
+Agregação horária \textit{Gold} &
+A janela horária foi actualizada? Quantos buckets foram recalculados? \\
+\addlinespace
+Auditoria \textit{streaming} (opcional) &
+Existem duplicados indevidos? Há eventos na \textit{bronze} ainda ausentes da \textit{Silver} (últimas 24\,h)? Estado global: OK ou alerta. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\clearpage
+
+% --- ANEXO J ---
+\section{Engenharia de Execução}
+\label{anexo:exec_engineering}
+
+Resumo das práticas de fiabilidade e desempenho (Secção~\ref{sec:qa}, subsecção \textit{Retries, particionamento e desempenho analítico}).
+
+\begin{table}[ht]
+\centering
+\caption{Práticas de execução no \textit{lakehouse} JDPT.}
+\label{tab:exec-engineering}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}l X l@{}}
+\toprule
+\textbf{Prática} & \textbf{Como aplicámos} & \textbf{Pipeline} \\
+\midrule
+Retries &
+Flyte reexecuta \textit{tasks} \textit{streaming} em falha; Trino repete consultas com espera progressiva; emissor Kafka com confirmação e idempotência. \textit{Batch}: re-run manual, seguro por ACID. &
+\textit{Streaming} (+ emissor); \textit{batch} manual \\
+\addlinespace
+Particionamento &
+Gold particionada por dia; filtros temporais nos \textit{dashboards} activam \textit{partition pruning}. Reflectido nos contratos (\texttt{delivery.storage.partitions}). &
+\textit{Batch} (Produtos A/B) \\
+\addlinespace
+Redução de \textit{shuffle} &
+Dedup de torres antes do join Haversine; pré-agregação de testes de voz por dia/telefone; filtros 3GPP nas médias. &
+Produto A \\
+\addlinespace
+Mitigação de \textit{skew} &
+Carga \textit{churn} dia a dia numa transacção; dedup de células físicas evita explosão de linhas no join torre$\times$log. &
+Produto B; Produto A \\
+\addlinespace
+Materialização &
+Tabelas \texttt{gold.*} materializadas por \textit{batch} ACID; consumo BI repetido sem recomputar \textit{joins}. &
+\textit{Batch} \\
+\addlinespace
+\textit{Query-on-read} &
+Vista \texttt{vw\_storm\_impact\_executive} cruza Produtos A+B sem duplicar ficheiros Iceberg. &
+\textit{Batch} (pós-carga) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+\end{document}

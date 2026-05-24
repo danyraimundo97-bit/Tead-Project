@@ -1,0 +1,141 @@
+# ================ #
+# DATA CONTRACTS   #
+# ================ #
+
+# ==============================================================================
+# DATA CONTRACT: Qualidade de Rede Diária
+# ==============================================================================
+contract:
+  id: gold.network_quality_daily
+  version: 1.0.0
+  applies_to_product: gold.network_quality_daily
+  status: active
+
+interface:
+    grain: "1 row per (tower_id, date)"     # O nível de granularidade
+    primary_key: ["tower_id", "date"]       # Chave primária composta
+
+# Esquema tipado (Trino)
+schema:
+  - name: tower_id
+    type: string
+    nullable: false
+    description: "Identificador único da antena de Leiria."
+  - name: date
+    type: date
+    nullable: false
+    description: "Data de processamento (UTC)."
+  - name: avg_rsrp_dbm
+    type: decimal(10,2)
+    nullable: true
+    description: "Potência média do sinal rádio recebido no dia."
+  - name: drop_rate_pct
+    type: decimal(5,2)
+    nullable: false
+    description: "Percentagem de Call Tests que resultaram em DROP."
+  - name: avg_critical_handover_dist_m
+    type: decimal(10,2)
+    nullable: true
+    description: "Distância média da antena ao local onde a chamada cai."
+  - name: tower_status
+    type: string
+    nullable: false
+    description: "Estado da infraestrutura: 'ACTIVE' ou 'DOWN'."
+
+# Semântica do negócio
+semantics:
+  definitions:
+    drop_rate_pct: "(Chamadas DROP / Total de Chamadas testadas na antena) * 100."
+    tower_status: "Definido como DOWN se a antena reportou falha crítica ou foi destruída."
+
+# Regras de Qualidade
+quality:
+  constraints:
+    - rule: "uniqueness(tower_id, date) == 100%"
+      severity: error             # Falha o pipeline se houver duplicados
+    - rule: "drop_rate_pct >= 0 AND drop_rate_pct <= 100"
+      severity: error
+    - rule: "avg_rsrp_dbm <= 0"   # O sinal RSRP é sempre negativo (ex: -80 dBm é bom, -120 é mau)
+      severity: warning
+  slo:
+    freshness: "P95 <= 4h after end-of-day" # Dados prontos às 04:00
+
+# Como gerimos as mudanças no futuro
+change_management:
+  compatibility_rules:
+    - change: "add_nullable_column"
+      version_bump: minor
+      compatibility: backward     # Não quebra os dashboards atuais
+    - change: "rename_column"
+      version_bump: major
+      compatibility: breaking     # Avisa o NOC que o dashboard vai partir!
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+
+# ==============================================================================
+# DATA CONTRACT: Risco de Churn Diário
+# ==============================================================================
+contract:
+  id: gold.churn_risk_daily
+  version: 1.0.0
+  applies_to_product: gold.churn_risk_daily
+  status: active
+
+interface:
+  grain: "1 row per (phone_number, date)"   # O nível de granularidade
+  primary_key: ["phone_number", "date"]     # Chave primária composta
+
+# Esquema tipado (Trino)
+schema:
+  - name: phone_number
+    type: string
+    nullable: false
+    description: "Número de telefone encriptado/hash."
+  - name: date
+    type: date
+    nullable: false
+    description: "Data de processamento (UTC)."
+  - name: avg_mos_7d
+    type: decimal(3,2)
+    nullable: true
+    description: "Mean Opinion Score médio do cliente nos últimos 7 dias (1 a 5)."
+  - name: custserv_calls_7d
+    type: integer
+    nullable: false
+    description: "Total de chamadas feitas para o apoio ao cliente nos últimos 7 dias."
+  - name: daily_charge_eur
+    type: decimal(10,2)
+    nullable: false
+    description: "Gasto diário do cliente (receita da operadora)."
+  - name: is_churned
+    type: boolean
+    nullable: false
+    description: "True se o cliente cancelou o contrato no próprio dia."
+  - name: revenue_at_risk_eur
+    type: decimal(10,2)
+    nullable: false
+    description: "Projeção a 30 dias do gasto diário se o cliente tem MOS < 2.0."
+
+# Semântica do negócio
+semantics:
+  definitions:
+    avg_mos_7d: "Média móvel de 7 dias do MOS. Ignora dias sem chamadas."
+    revenue_at_risk_eur: >
+      "Métrica financeira: daily_charge_eur * 30 se avg_mos_7d < 2.0 
+      E custserv_calls_7d >= 2. Caso contrário, é 0."
+
+# Regras de Qualidade
+quality:
+  constraints:
+    - rule: "uniqueness(phone_number, date) == 100%"
+      severity: error
+    - rule: "avg_mos_7d >= 1.0 AND avg_mos_7d <= 5.0"
+      severity: error             # O MOS é estritamente entre 1 e 5
+    - rule: "no_nulls(phone_number, date, daily_charge_eur)"
+      severity: error             # É vital não ter nulos nas chaves de faturação
+
+behavior:
+  late_data_policy:
+    allowed_lateness: "3 days"    # Faturação pode chegar com atraso
+    correction_strategy: "recompute affected partitions and MERGE"

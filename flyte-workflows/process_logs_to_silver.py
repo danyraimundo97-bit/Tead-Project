@@ -8,6 +8,7 @@ from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
 from workflow_functions.silver_transforms import transform_network_logs_silver_features
+from workflow_functions.trino_acid import replace_table_transaction
 
 logger = get_logger(__name__)
 
@@ -249,12 +250,11 @@ def process_logs_to_silver() -> str:
         )
         cur.fetchall()
 
-        logger.info("Replacing iceberg.silver.network_logs with full batch")
-        cur.execute("TRUNCATE TABLE iceberg.silver.network_logs")
-        cur.fetchall()
-
-        cur.execute(
-            """
+        logger.info("Replacing iceberg.silver.network_logs with full batch (ACID)")
+        replace_table_transaction(
+            conn,
+            table_fqn="iceberg.silver.network_logs",
+            insert_sql="""
             INSERT INTO iceberg.silver.network_logs (
                 silver_row_id, timestamp_log, devicemake, devicemodel, network_provider,
                 nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
@@ -268,9 +268,9 @@ def process_logs_to_silver() -> str:
                 rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
                 latitude, longitude, phone_number
             FROM hive.staging.temp_logs_batch
-        """
+            """,
+            logger=logger,
         )
-        cur.fetchall()
 
         cur.execute("DROP TABLE hive.staging.temp_logs_batch")
         cur.fetchall()

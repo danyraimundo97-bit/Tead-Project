@@ -1,0 +1,125 @@
+# ================ #
+# DATA PRODUCTS    #
+# ================ #
+
+📡 Produto A: Dashboard de Qualidade de Rede
+Este produto foca-se na infraestrutura.
+Grão : 1 linha por Antena (Torre) por Dia.
+
+# ==============================================================================
+# DATA PRODUCT: Qualidade de Rede Diária (gold.network_quality_daily)
+# ==============================================================================
+product:
+  id: gold.network_quality_daily
+  layer: gold
+  domain: network_operations      # Domínio de negócio responsável
+  owner:
+    team: noc-engineering         # NOC - Network Operations Center
+    contact: noc@telecom.pt
+  description: "Métricas diárias de condições de rádio, retenção de chamadas e estado físico das infraestruturas." 
+  consumers: # Quem vai consumir estes dados
+    - name: bi.infrastructure_map # Dashboard geoespacial de Leiria
+      type: bi
+      access: trino_sql           # Vão aceder via SQL no Trino
+
+# Como o dado é servido
+delivery:
+  storage:
+    system: minio
+    format: iceberg             # Formato nativo Lakehouse para tabelas fiáveis
+    bucket: warehouse
+    table_identifier: warehouse.gold.network_quality_daily
+    partitions:
+      - date                    # Particionado por data para queries eficientes
+    update_mode: merge          # Upsert idempotente (evita duplicados se o Flyte correr 2x)
+  serving:
+    query_engine: trino
+    stable_views:
+      - warehouse.semantic.vw_network_quality_current
+
+# Como o dado é gerado
+production:
+  orchestrator: flyte
+  workflow: workflows.gold_network_quality_wf
+  schedule: "0 3 * * *"         # Corre todos os dias às 03:00 da manhã
+  backfills:
+    supported: true             # Se descobrirmos um erro, podemos recalcular o passado
+    unit: day
+
+# De onde vêm os dados (Linhagem)
+lineage:
+  sources:
+    - warehouse.silver.network_logs_clean
+    - warehouse.silver.towers_status
+    - warehouse.silver.call_tests_clean
+
+# Observabilidade
+observability:
+  alerts:
+    - type: freshness_breach
+      notify: "#noc-data-alerts" # Alerta no Slack/Teams se os dados não chegarem a horas
+
+references:
+  contract_file: contracts/gold.network_quality_daily.yaml
+
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+📉 Produto B: Painel de Retenção e Risco de Churn
+Este produto cruza dados técnicos com dados financeiros.
+Grão : 1 linha por Cliente (Phone Number) por Dia.
+
+# ==============================================================================
+# DATA PRODUCT: Retenção e Risco de Churn (gold.churn_risk_daily)
+# ==============================================================================
+product:
+  id: gold.churn_risk_daily
+  layer: gold
+  domain: customer_retention      # Domínio diferente do Produto A!
+  owner:
+    team: marketing-data-team
+    contact: mkt-analytics@telecom.pt
+  description: "Visão do impacto das falhas de rede nos clientes com receita em risco (Revenue at Risk) baseada no MOS e no histórico de chamadas para o Suporte." 
+  consumers: # Quem vai consumir estes dados 
+    - name: bi.churn_executive_dashboard
+      type: bi
+      access: trino_sql
+    - name: ml.churn_prediction_model # MLflow
+      type: ml
+      access: trino_sql
+
+# Como o dado é servido
+delivery:
+  storage:
+    system: minio
+    format: iceberg
+    bucket: warehouse
+    table_identifier: warehouse.gold.churn_risk_daily
+    partitions:
+      - date
+    update_mode: merge
+  serving:
+    query_engine: trino
+
+# Como o dado é gerado
+production:
+  orchestrator: flyte
+  workflow: workflows.gold_churn_risk_wf
+  schedule: "0 4 * * *"         # Corre todos os dias às 04:00 da manhã
+
+# De onde vêm os dados (Linhagem)
+lineage:
+  sources:
+    - warehouse.silver.call_tests_clean
+    - warehouse.silver.cdr_customers_clean
+
+governance:                     # Regras de negócio restritas (GPD/Privacidade)
+  data_classification: confidential
+  pii: medium                   # Contém números de telefone
+  access_policy:
+    read_roles:
+      - marketing_analysts
+      - data_scientists         # Apenas estas equipas podem aceder ao Trino

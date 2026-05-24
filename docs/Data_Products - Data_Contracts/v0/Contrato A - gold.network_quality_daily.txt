@@ -1,0 +1,68 @@
+# ================ #
+# DATA CONTRACT A  #
+# Versão: v0.1.0 (especificação conceptual — pré-implementação)
+# ================ #
+
+# ==============================================================================
+# DATA CONTRACT: Qualidade de Rede Diária
+# ==============================================================================
+contract:
+  id: gold.network_quality_daily
+  version: 0.1.0
+  applies_to_product: gold.network_quality_daily
+  status: draft
+
+interface:
+  grain: "1 row per (tower_id, date)"
+  primary_key: ["tower_id", "date"]
+
+schema:
+  - name: tower_id
+    type: string
+    nullable: false
+    description: "Identificador único da antena de Leiria."
+  - name: date
+    type: date
+    nullable: false
+    description: "Data de processamento (UTC)."
+  - name: avg_rsrp_dbm
+    type: decimal(10,2)
+    nullable: true
+    description: "Potência média do sinal rádio recebido no dia."
+  - name: drop_rate_pct
+    type: decimal(5,2)
+    nullable: false
+    description: "Percentagem de Call Tests que resultaram em DROP."
+  - name: avg_critical_handover_dist_m
+    type: decimal(10,2)
+    nullable: true
+    description: "Distância média da antena ao local onde a chamada cai."
+  - name: tower_status
+    type: string
+    nullable: false
+    description: "Estado da infraestrutura: 'ACTIVE' ou 'DOWN'."
+
+semantics:
+  definitions:
+    drop_rate_pct: "(Chamadas DROP / Total de Chamadas testadas na antena) * 100."
+    tower_status: "Definido como DOWN se a antena reportou falha crítica ou foi destruída."
+
+quality:
+  constraints:
+    - rule: "uniqueness(tower_id, date) == 100%"
+      severity: error
+    - rule: "drop_rate_pct >= 0 AND drop_rate_pct <= 100"
+      severity: error
+    - rule: "avg_rsrp_dbm <= 0"
+      severity: warning
+  slo:
+    freshness: "P95 <= 4h after end-of-day"
+
+change_management:
+  compatibility_rules:
+    - change: "add_nullable_column"
+      version_bump: minor
+      compatibility: backward
+    - change: "rename_column"
+      version_bump: major
+      compatibility: breaking

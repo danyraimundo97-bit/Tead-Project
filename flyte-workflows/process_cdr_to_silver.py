@@ -9,6 +9,7 @@ from flytekit import ImageSpec, Resources, task
 from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
+from workflow_functions.trino_acid import replace_table_transaction
 
 logger = get_logger(__name__)
 
@@ -121,16 +122,18 @@ def process_cdr_to_silver() -> str:
                 else:
                     df = pd.concat([df, part], ignore_index=True, copy=False)
                     del part
+        # Limpar o cache do pandas
         gc.collect()
-
         if df is None:
             raise ValueError(f"❌ Nenhum dado particionado encontrado em {SOURCE_FILE_KEY}")
 
         lines = pd.Series(np.arange(2, len(df) + 2, dtype=np.int64), index=df.index)
 
+        # normalizar os nomes das colunas
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.lower()
         bronze_only = df.copy()
-        df.rename(columns={"phone_number": "phone_number"}, inplace=True)
+        # TODO: Testar se o rename é necessário
+        #df.rename(columns={"phone_number": "phone_number"}, inplace=True)
 
         total_rows = len(df)
         row_quarantine = pd.Series(False, index=df.index)
@@ -163,16 +166,22 @@ def process_cdr_to_silver() -> str:
                 raise ValueError(
                     f"❌ DATA QUALITY BREACH: '{col}' lost {failure_rate * 100:.1f}% of its data!"
                 )
-
+            # adicionar as linhas destruídas ao quarantena
             row_quarantine = row_quarantine | destroyed_mask
+            # adicionar as colunas destruídas ao dicionário de problemas
             for i in df.index[destroyed_mask]:
+                # adicionar a coluna destruída ao dicionário de problemas
                 issues_by_row.setdefault(int(i), []).append(col)
+            # adicionar os valores limpos às colunas limpas
             cleaned_by_col[col] = cleaned_values
 
         if "churn" not in df.columns:
             raise ValueError("❌ DATA STRUCTURE CHANGE: Expected column 'churn' not found!")
+        # limpar a coluna churn
         cleaned_churn, destroyed_churn = _clean_churn_series(df["churn"])
+        # contar as linhas destruídas
         destroyed_count = int(destroyed_churn.sum())
+        # se houver linhas destruídas, emitir um aviso
         if destroyed_count > 0:
             logger.warning(
                 "⚠️ AUDIT WARNING: Column 'churn' had %s values destroyed during cleaning.",
@@ -188,11 +197,15 @@ def process_cdr_to_silver() -> str:
             issues_by_row.setdefault(int(i), []).append("churn")
         cleaned_by_col["churn"] = cleaned_churn
 
+        # adicionar os valores limpos às colunas limpas
         for col in CDR_NUMERIC_COLS:
             df[col] = cleaned_by_col[col]
+        # adicionar os valores limpos à coluna churn
         df["churn"] = cleaned_by_col["churn"].fillna(False).astype(bool)
 
+        # obter os índices das linhas quarantinadas
         q_idx = df.index[row_quarantine]
+        # se houver linhas quarantinadas, inserir as linhas na tabela de quarantena
         if len(q_idx) > 0:
             conn_q = trino.dbapi.connect(
                 host="host.docker.internal",
@@ -256,11 +269,10 @@ def process_cdr_to_silver() -> str:
         )
         cur.fetchall()
 
-        cur.execute("TRUNCATE TABLE iceberg.silver.cdr_customers")
-        cur.fetchall()
-
-        cur.execute(
-            """
+        replace_table_transaction(
+            conn,
+            table_fqn="iceberg.silver.cdr_customers",
+            insert_sql="""
             INSERT INTO iceberg.silver.cdr_customers (
                 silver_row_id, phone_number, account_length, vmail_message, day_mins, day_calls,
                 day_charge, eve_mins, eve_calls, eve_charge, night_mins, night_calls, night_charge,
@@ -273,9 +285,9 @@ def process_cdr_to_silver() -> str:
                 eve_mins, eve_calls, eve_charge, night_mins, night_calls, night_charge,
                 intl_mins, intl_calls, intl_charge, custserv_calls, churn
             FROM hive.staging.temp_cdr
-            """
+            """,
+            logger=logger,
         )
-        cur.fetchall()
 
         cur.execute("DROP TABLE hive.staging.temp_cdr")
         cur.fetchall()

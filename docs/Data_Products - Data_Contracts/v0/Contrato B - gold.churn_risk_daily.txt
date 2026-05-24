@@ -1,0 +1,68 @@
+# ================ #
+# DATA CONTRACT B  #
+# Versão: v0.1.0 (especificação conceptual — pré-implementação)
+# ================ #
+
+# ==============================================================================
+# DATA CONTRACT: Risco de Churn Diário
+# ==============================================================================
+contract:
+  id: gold.churn_risk_daily
+  version: 0.1.0
+  applies_to_product: gold.churn_risk_daily
+  status: draft
+
+interface:
+  grain: "1 row per (phone_number, date)"
+  primary_key: ["phone_number", "date"]
+
+schema:
+  - name: phone_number
+    type: string
+    nullable: false
+    description: "Número de telefone encriptado/hash."
+  - name: date
+    type: date
+    nullable: false
+    description: "Data de processamento (UTC)."
+  - name: avg_mos_7d
+    type: decimal(3,2)
+    nullable: true
+    description: "Mean Opinion Score médio do cliente nos últimos 7 dias (1 a 5)."
+  - name: custserv_calls_7d
+    type: integer
+    nullable: false
+    description: "Total de chamadas feitas para o apoio ao cliente nos últimos 7 dias."
+  - name: daily_charge_eur
+    type: decimal(10,2)
+    nullable: false
+    description: "Gasto diário do cliente (receita da operadora)."
+  - name: is_churned
+    type: boolean
+    nullable: false
+    description: "True se o cliente cancelou o contrato no próprio dia."
+  - name: revenue_at_risk_eur
+    type: decimal(10,2)
+    nullable: false
+    description: "Projeção a 30 dias do gasto diário se o cliente tem MOS < 2.0."
+
+semantics:
+  definitions:
+    avg_mos_7d: "Média móvel de 7 dias do MOS. Ignora dias sem chamadas."
+    revenue_at_risk_eur: >
+      "Métrica financeira: daily_charge_eur * 30 se avg_mos_7d < 2.0
+      E custserv_calls_7d >= 2. Caso contrário, é 0."
+
+quality:
+  constraints:
+    - rule: "uniqueness(phone_number, date) == 100%"
+      severity: error
+    - rule: "avg_mos_7d >= 1.0 AND avg_mos_7d <= 5.0"
+      severity: error
+    - rule: "no_nulls(phone_number, date, daily_charge_eur)"
+      severity: error
+
+behavior:
+  late_data_policy:
+    allowed_lateness: "3 days"
+    correction_strategy: "recompute affected partitions and MERGE"

@@ -1,0 +1,68 @@
+# ================ #
+# DATA PRODUCT B   #
+# Versão: v1.0.0 (implementação — activa)
+# Histórico: v0/Produto B - gold.churn_risk_daily.txt
+# ================ #
+
+product:
+  id: gold.churn_risk_daily
+  layer: gold
+  domain: customer_retention
+  owner:
+    team: marketing-data-team
+    contact: retencao@jdpt.pt
+  description: >
+    Cruza perfil de faturação (CDR), qualidade de voz (MOS/drops) e exposição
+    geográfica à tempestade para priorizar retenção e quantificar receita em risco.
+  consumers:
+    - name: bi.churn_executive_dashboard
+      type: bi
+      access: trino_sql
+    - name: superset.churn_risk_dashboard
+      type: bi
+      access: trino_sql
+    - name: ml.churn_prediction_model
+      type: ml
+      access: trino_sql
+      status: planned
+      feature_table: iceberg.gold.churn_risk_daily
+
+delivery:
+  storage:
+    system: minio
+    format: iceberg
+    bucket: warehouse
+    table_identifier: iceberg.gold.churn_risk_daily
+    partitions:
+      - Data_Referencia
+    update_mode: acid_replace
+  serving:
+    query_engine: trino
+    stable_views:
+      - iceberg.gold.vw_storm_impact_executive
+
+production:
+  orchestrator: flyte
+  workflow: jdpt_lakehouse_pipeline
+  task: build_gold_churn_risk
+  schedule: "0 4 * * *"
+  backfills:
+    supported: true
+    unit: day
+
+lineage:
+  sources:
+    - iceberg.silver.cdr_customers
+    - iceberg.silver.call_tests
+    - iceberg.silver.network_logs
+
+governance:
+  data_classification: confidential
+  pii: medium
+  access_policy:
+    read_roles:
+      - marketing_analysts
+      - data_scientists
+
+references:
+  contract_file: v1/Contrato B - gold.churn_risk_daily.txt

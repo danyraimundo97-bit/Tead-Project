@@ -1,0 +1,111 @@
+# ================ #
+# DATA CONTRACT A  #
+# Versão activa: v1.0.0 — ver v1/ e histórico v0/
+# Alinhamento operacional (batch estático): v2/ (v1.1.0) — ver COMPARACAO_v1_v2.md
+# ================ #
+
+# ==============================================================================
+# DATA CONTRACT: Qualidade de Rede Diária (implementação Trino/Iceberg)
+# ==============================================================================
+contract:
+  id: gold.network_quality_daily
+  version: 1.0.0
+  applies_to_product: gold.network_quality_daily
+  catalog_table: iceberg.gold.network_quality_daily
+  status: active
+
+interface:
+  grain: "1 linha por (ID_Antena_Conectada, dia de calendário)"
+  primary_key: ["ID_Antena_Conectada", "Data_Hora"]
+  notes: >
+    Data_Hora é o início do dia (CAST do snapshot_date da torre).
+    gold_row_id é surrogate key técnica (monotónica).
+
+schema:
+  - name: gold_row_id
+    type: bigint
+    nullable: false
+    description: "Chave surrogate técnica (ROW_NUMBER na carga)."
+  - name: Data_Hora
+    type: timestamp(3)
+    nullable: false
+    description: "Início do dia de referência (UTC/local conforme bronze)."
+  - name: Zona_Leiria
+    type: varchar
+    nullable: true
+    description: "Quadrante geográfico derivado das coordenadas da torre."
+  - name: Latitude_Ocorrencia
+    type: double
+    nullable: true
+  - name: Longitude_Ocorrencia
+    type: double
+    nullable: true
+  - name: Torre_Latitude
+    type: double
+    nullable: true
+  - name: Torre_Longitude
+    type: double
+    nullable: true
+  - name: ID_Antena_Conectada
+    type: bigint
+    nullable: false
+    description: "Identificador da célula (cell) da torre OpenCelliD."
+  - name: Estado_Antena
+    type: boolean
+    nullable: true
+    description: "status da torre no snapshot do dia (ACTIVE/DOWN na bronze)."
+  - name: Distancia_Antena_m
+    type: double
+    nullable: true
+    description: "Distância média Haversine log→torre no dia."
+  - name: Tecnologia_Rede
+    type: varchar
+    nullable: true
+    description: "LTE/GSM/UMTS/NR/CDMA/OTHER a partir de radio_ohe_* da torre."
+  - name: Potencia_RSRP
+    type: double
+    nullable: true
+    description: "Média RSRP (dBm), apenas valores entre -140 e -44."
+  - name: Qualidade_RSRQ
+    type: double
+    nullable: true
+  - name: Ruido_SINR
+    type: double
+    nullable: true
+  - name: Velocidade_Downlink
+    type: double
+    nullable: true
+  - name: Telefones_Sucesso
+    type: bigint
+    nullable: true
+  - name: Telefones_Falha
+    type: bigint
+    nullable: true
+  - name: Telefones_Sem_Teste
+    type: bigint
+    nullable: true
+
+semantics:
+  definitions:
+    drop_rate_proxy: "(Telefones_Falha / (Telefones_Sucesso + Telefones_Falha)) * 100 quando há testes."
+    Estado_Antena: "FALSE indica torre DOWN no snapshot (simulação tempestade Leste)."
+
+quality:
+  constraints:
+    - rule: "uniqueness(ID_Antena_Conectada, Data_Hora) == 100%"
+      severity: error
+    - rule: "Potencia_RSRP IS NULL OR (Potencia_RSRP BETWEEN -140 AND -44)"
+      severity: warning
+    - rule: "Torre_Latitude IS NOT NULL AND Torre_Longitude IS NOT NULL para consumo em mapas"
+      severity: error
+  slo:
+    freshness: "P95 <= 4h após fim do dia civil (batch Flyte ~03:00)"
+
+change_management:
+  compatibility_rules:
+    - change: "add_nullable_column"
+      version_bump: minor
+      compatibility: backward
+    - change: "rename_column"
+      version_bump: major
+      compatibility: breaking

@@ -3,6 +3,10 @@ from flytekit import ImageSpec, task
 
 from flyte_task_env import TASK_ENV
 from workflow_functions.loki_logging import get_logger
+from workflow_functions.trino_acid import (
+    replace_table_transaction,
+    replace_table_transaction_multi_insert,
+)
 
 logger = get_logger(__name__)
 
@@ -119,15 +123,16 @@ def build_gold_network_quality() -> str:
         cur.execute(_COUNT_SILVER_LOGS)
         n_logs = int(cur.fetchone()[0])
         if n_logs == 0:
-            logger.warning("Silver network_logs is empty; truncating gold only")
-            cur.execute("TRUNCATE TABLE iceberg.gold.network_quality_daily")
-            cur.fetchall()
+            logger.warning("Silver network_logs is empty; clearing gold atomically")
+            replace_table_transaction_multi_insert(
+                conn,
+                table_fqn="iceberg.gold.network_quality_daily",
+                insert_sqls=[],
+                logger=logger,
+            )
             return "Gold network_quality_daily empty (no silver logs)"
 
-        logger.info("Truncating gold.network_quality_daily for full rebuild")
-        cur.execute("TRUNCATE TABLE iceberg.gold.network_quality_daily")
-        cur.fetchall()
-
+        logger.info("Replacing gold.network_quality_daily (ACID full batch)")
         insert_query = f"""
             INSERT INTO iceberg.gold.network_quality_daily
             WITH tests_by_day AS (
@@ -246,8 +251,12 @@ def build_gold_network_quality() -> str:
                 dt.radio_ohe_cdma,
                 dt.radio_ohe_other
         """
-        cur.execute(insert_query)
-        cur.fetchall()
+        replace_table_transaction(
+            conn,
+            table_fqn="iceberg.gold.network_quality_daily",
+            insert_sql=insert_query,
+            logger=logger,
+        )
 
         _assert_antenna_columns_sane(cur, context="After INSERT network_quality")
 

@@ -319,7 +319,8 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
             "Qualidade_Audio_MOS" DOUBLE,
             "Desistencia" BOOLEAN
         ) WITH (
-            format = 'PARQUET'
+            format = 'PARQUET',
+            partitioning = ARRAY['"Data_Referencia"']
         )
         """
     )
@@ -347,7 +348,8 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
             "Telefones_Falha" BIGINT,
             "Telefones_Sem_Teste" BIGINT
         ) WITH (
-            format = 'PARQUET'
+            format = 'PARQUET',
+            partitioning = ARRAY['day("Data_Hora")']
         )
         """
     )

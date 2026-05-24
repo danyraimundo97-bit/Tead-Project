@@ -8,6 +8,7 @@ from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
 from workflow_functions.silver_transforms import transform_call_tests_silver_features
+from workflow_functions.trino_acid import replace_table_transaction
 
 logger = get_logger(__name__)
 
@@ -234,12 +235,11 @@ def process_call_tests_to_silver() -> str:
         )
         cur.fetchall()
 
-        logger.info("Replacing iceberg.silver.call_tests with full batch")
-        cur.execute("TRUNCATE TABLE iceberg.silver.call_tests")
-        cur.fetchall()
-
-        cur.execute(
-            """
+        logger.info("Replacing iceberg.silver.call_tests with full batch (ACID)")
+        replace_table_transaction(
+            conn,
+            table_fqn="iceberg.silver.call_tests",
+            insert_sql="""
             INSERT INTO iceberg.silver.call_tests (
                 silver_row_id, date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
                 duration_s, setup_time_s, result, mos, phone_number,
@@ -253,9 +253,9 @@ def process_call_tests_to_silver() -> str:
                 tech_ohe_gsm, tech_ohe_umts, tech_ohe_lte, tech_ohe_volte,
                 tech_ohe_nr, tech_ohe_other
             FROM hive.staging.temp_tests_batch
-        """
+            """,
+            logger=logger,
         )
-        cur.fetchall()
 
         cur.execute("DROP TABLE hive.staging.temp_tests_batch")
         cur.fetchall()

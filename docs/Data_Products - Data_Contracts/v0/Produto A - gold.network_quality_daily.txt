@@ -1,0 +1,53 @@
+# ================ #
+# DATA PRODUCT A   #
+# Versão: v0.1.0 (especificação conceptual — pré-implementação)
+# ================ #
+
+product:
+  id: gold.network_quality_daily
+  layer: gold
+  domain: network_operations
+  owner:
+    team: noc-engineering
+    contact: noc@telecom.pt
+  description: "Métricas diárias de condições de rádio, retenção de chamadas e estado físico das infraestruturas."
+  consumers:
+    - name: bi.infrastructure_map
+      type: bi
+      access: trino_sql
+
+delivery:
+  storage:
+    system: minio
+    format: iceberg
+    bucket: warehouse
+    table_identifier: warehouse.gold.network_quality_daily
+    partitions:
+      - date
+    update_mode: merge
+  serving:
+    query_engine: trino
+    stable_views:
+      - warehouse.semantic.vw_network_quality_current
+
+production:
+  orchestrator: flyte
+  workflow: workflows.gold_network_quality_wf
+  schedule: "0 3 * * *"
+  backfills:
+    supported: true
+    unit: day
+
+lineage:
+  sources:
+    - warehouse.silver.network_logs_clean
+    - warehouse.silver.towers_status
+    - warehouse.silver.call_tests_clean
+
+observability:
+  alerts:
+    - type: freshness_breach
+      notify: "#noc-data-alerts"
+
+references:
+  contract_file: v0/Contrato A - gold.network_quality_daily.txt

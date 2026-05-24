@@ -1,213 +1,234 @@
-# Tead Lakehouse — Fluxos de dados (Mermaid)
+# Tabelas do Lakehouse JDPT (Mermaid)
 
-**Diagramas ER (entidade–relação):** ver **[lakehouse_er.md](lakehouse_er.md)** — é o documento principal para tabelas, PK/FK e cardinalidade.
+Dois diagramas **só com tabelas e colunas** (sem relações). Colar cada bloco em [mermaid.live](https://mermaid.live).
 
-Fontes: `sql_scripts/setup_streaming_tables.sql`, `flyte-workflows/ensure_pipeline_layers.py`
+Ficheiros fonte: [`diagrams/lakehouse-tables-batch.mmd`](diagrams/lakehouse-tables-batch.mmd), [`diagrams/lakehouse-tables-streaming.mmd`](diagrams/lakehouse-tables-streaming.mmd).
 
-> **Como renderizar:** preview Markdown no Cursor, ou cola um `.mmd` em [mermaid.live](https://mermaid.live) (não coles o `.md` inteiro).
+---
 
-Ficheiros `.mmd`:
+## Fluxo 1 — Batch (`jdpt_lakehouse_pipeline`)
 
-| Fluxo | ER |
-|-------|-----|
-| [streaming-flow.mmd](diagrams/streaming-flow.mmd) | [streaming-er.mmd](diagrams/streaming-er.mmd) |
-| [batch-flow.mmd](diagrams/batch-flow.mmd) | [batch-er.mmd](diagrams/batch-er.mmd), [batch-er-silver.mmd](diagrams/batch-er-silver.mmd), [batch-er-gold.mmd](diagrams/batch-er-gold.mmd) |
-| — | [lakehouse-er-overview.mmd](diagrams/lakehouse-er-overview.mmd) |
-
-## Streaming — fluxo de dados
-
-```mermaid
-flowchart LR
-  producer["producer_network_events.py"]
-  redpanda[("Redpanda network_events")]
-  kafka["kafka.default.network_events"]
-  bronze["bronze.network_events_raw"]
-  silver["silver.network_events_clean"]
-  gold["gold.network_events_hourly"]
-  ckpt["streaming_checkpoints"]
-
-  producer -->|JSON| redpanda
-  redpanda -->|Trino kafka catalog| kafka
-  kafka -->|MERGE event_id| bronze
-  bronze -->|MERGE event_id| silver
-  silver -->|DELETE INSERT 7d| gold
-  ckpt -.->|watermark| silver
-```
-
-## Streaming — modelo de tabelas
+Bronze = CSV em `s3://warehouse/bronze/` · Silver/Gold = Iceberg (`iceberg.silver`, `iceberg.gold`).
 
 ```mermaid
 erDiagram
-  kafka_network_events ||--o{ bronze_network_events_raw : merges
-  bronze_network_events_raw ||--o| silver_network_events_clean : merges
-  silver_network_events_clean }o--|| gold_network_events_hourly : aggregates
+    minio_bronze_cdr_customers {
+        string phone_number
+        string churn
+        string day_charge
+        string eve_charge
+    }
 
-  kafka_network_events {
-    string event_id PK
-    string phone_number
-    string device_id
-    string network_type
-    float rsrp
-    float sinr
-    float latitude
-    float longitude
-    string event_time
-  }
+    minio_bronze_network_logs {
+        string timestamp
+        string phone_number
+        string rsrp
+        string latitude
+        string longitude
+    }
 
-  bronze_network_events_raw {
-    string event_id PK
-    string phone_number
-    string device_id
-    string network_type
-    float rsrp
-    float sinr
-    float latitude
-    float longitude
-    string event_time_raw
-    string ingestion_timestamp
-    string ingest_batch_id
-  }
+    minio_bronze_call_tests {
+        string date_of_test
+        string phone_number
+        string mos
+        string call_test_result
+    }
 
-  streaming_checkpoints {
-    string pipeline_name PK
-    string last_silver_watermark
-    string updated_at
-  }
+    minio_bronze_towers {
+        string radio
+        int mcc
+        int cell
+        string lat
+        string lon
+        string status
+    }
 
-  silver_network_events_clean {
-    string event_id PK
-    string phone_number
-    string device_id
-    string network_type
-    float rsrp
-    float sinr
-    float latitude
-    float longitude
-    string event_time
-    string ingested_at
-  }
+    silver_cdr_customers {
+        bigint silver_row_id PK
+        varchar phone_number
+        int account_length
+        int vmail_message
+        double day_mins
+        int day_calls
+        double day_charge
+        double eve_mins
+        int eve_calls
+        double eve_charge
+        double night_mins
+        int night_calls
+        double night_charge
+        double intl_mins
+        int intl_calls
+        double intl_charge
+        int custserv_calls
+        boolean churn
+    }
 
-  gold_network_events_hourly {
-    string bucket_hour
-    string network_type
-    int event_count
-    float avg_rsrp
-    float avg_sinr
-    int poor_signal_count
-    string updated_at
-  }
+    silver_network_logs {
+        bigint silver_row_id PK
+        timestamp timestamp_log
+        varchar devicemake
+        varchar devicemodel
+        varchar network_provider
+        boolean nt_ohe_lte
+        boolean nt_ohe_gsm
+        boolean nt_ohe_umts
+        boolean nt_ohe_nr
+        boolean nt_ohe_cdma
+        boolean nt_ohe_other
+        double rsrp
+        double rsrq
+        double sinr
+        double pci
+        double downlink_mbps
+        double uplink_mbps
+        double velocity_kmh
+        double latitude
+        double longitude
+        varchar phone_number
+    }
+
+    silver_call_tests {
+        bigint silver_row_id PK
+        timestamp date_of_test
+        double signal_dbm
+        double speed_m_s
+        double distance_from_site_m
+        double duration_s
+        double setup_time_s
+        boolean result
+        double mos
+        varchar phone_number
+        boolean tech_ohe_gsm
+        boolean tech_ohe_umts
+        boolean tech_ohe_lte
+        boolean tech_ohe_volte
+        boolean tech_ohe_nr
+        boolean tech_ohe_other
+    }
+
+    silver_towers {
+        bigint silver_row_id PK
+        int mcc
+        int net
+        int area
+        int cell
+        bigint unit
+        double lon
+        double lat
+        int range_m
+        int samples
+        int changeable
+        varchar created
+        varchar updated
+        double average_signal
+        varchar snapshot_date
+        boolean status
+        boolean radio_ohe_gsm
+        boolean radio_ohe_umts
+        boolean radio_ohe_lte
+        boolean radio_ohe_nr
+        boolean radio_ohe_cdma
+        boolean radio_ohe_other
+    }
+
+    gold_network_quality_daily {
+        bigint gold_row_id PK
+        timestamp Data_Hora
+        varchar Zona_Leiria
+        double Latitude_Ocorrencia
+        double Longitude_Ocorrencia
+        double Torre_Latitude
+        double Torre_Longitude
+        bigint ID_Antena_Conectada
+        boolean Estado_Antena
+        double Distancia_Antena_m
+        varchar Tecnologia_Rede
+        double Potencia_RSRP
+        double Qualidade_RSRQ
+        double Ruido_SINR
+        double Velocidade_Downlink
+        bigint Telefones_Sucesso
+        bigint Telefones_Falha
+        bigint Telefones_Sem_Teste
+    }
+
+    gold_churn_risk_daily {
+        bigint gold_row_id PK
+        date Data_Referencia
+        varchar Telefone
+        boolean Afetado_Tempestade
+        double Receita_Em_Risco
+        int Tempo_Subscrito
+        int Total_Chamadas_Suporte
+        bigint Total_Drops
+        double Qualidade_Audio_MOS
+        boolean Desistencia
+    }
 ```
 
-> `kafka.default.network_events` não é Iceberg — tópico Redpanda (`trino/etc/kafka/network_events.json`).  
-> `streaming_checkpoints` guarda watermark (ver fluxo acima). PK composta em gold: `(bucket_hour, network_type)`.
+**Gold — grão:** `network_quality_daily` → torre × dia · `churn_risk_daily` → telefone × dia.
 
-## Batch — fluxo (Medallion CSV)
+---
 
-```mermaid
-flowchart TB
-  subgraph bronze_minio ["MinIO bronze CSV"]
-    b_logs["network_logs CSV"]
-    b_cdr["cdr_customers CSV"]
-    b_tests["call_tests CSV"]
-    b_towers["towers CSV"]
-  end
-
-  subgraph silver_iceberg ["iceberg.silver"]
-    s_logs["network_logs"]
-    s_cdr["cdr_customers"]
-    s_tests["call_tests"]
-    s_towers["towers"]
-  end
-
-  subgraph gold_iceberg ["iceberg.gold"]
-    g_quality["network_quality_daily"]
-    g_churn["churn_risk_daily"]
-  end
-
-  b_logs --> s_logs
-  b_cdr --> s_cdr
-  b_tests --> s_tests
-  b_towers --> s_towers
-
-  s_logs --> g_quality
-  s_towers --> g_quality
-  s_cdr --> g_churn
-  s_tests --> g_churn
-  s_logs --> g_churn
-```
-
-## Batch — modelo de tabelas (principais)
+## Fluxo 2 — Streaming (`jdpt_streaming_full_sync`)
 
 ```mermaid
 erDiagram
-  silver_network_logs ||--o{ gold_network_quality_daily : builds
-  silver_towers ||--o{ gold_network_quality_daily : joins
-  silver_cdr_customers ||--o{ gold_churn_risk_daily : builds
-  silver_call_tests ||--o{ gold_churn_risk_daily : builds
-  silver_network_logs ||--o{ gold_churn_risk_daily : builds
-  silver_cdr_customers ||--o{ silver_network_logs : phone_number
-  silver_cdr_customers ||--o{ silver_call_tests : phone_number
+    kafka_default_network_events {
+        varchar event_id
+        varchar phone_number
+        varchar device_id
+        varchar network_type
+        double rsrp
+        double sinr
+        double latitude
+        double longitude
+        varchar event_time
+    }
 
-  silver_network_logs {
-    int silver_row_id PK
-    string timestamp_log
-    string phone_number
-    float rsrp
-    float sinr
-    float latitude
-    float longitude
-  }
+    bronze_network_events_raw {
+        varchar event_id PK
+        varchar phone_number
+        varchar device_id
+        varchar network_type
+        double rsrp
+        double sinr
+        double latitude
+        double longitude
+        varchar event_time_raw
+        timestamp ingestion_timestamp
+        varchar ingest_batch_id
+    }
 
-  silver_cdr_customers {
-    int silver_row_id PK
-    string phone_number
-    boolean churn
-    float day_mins
-    int custserv_calls
-  }
+    bronze_streaming_checkpoints {
+        varchar pipeline_name PK
+        timestamp last_silver_watermark
+        timestamp updated_at
+    }
 
-  silver_call_tests {
-    int silver_row_id PK
-    string phone_number
-    string date_of_test
-    float mos
-    boolean result
-  }
+    silver_network_events_clean {
+        varchar event_id PK
+        varchar phone_number
+        varchar device_id
+        varchar network_type
+        double rsrp
+        double sinr
+        double latitude
+        double longitude
+        timestamp event_time
+        timestamp ingested_at
+    }
 
-  silver_towers {
-    int silver_row_id PK
-    int mcc
-    int net
-    int area
-    int cell
-    float lat
-    float lon
-  }
-
-  gold_network_quality_daily {
-    int gold_row_id PK
-    string Data_Hora
-    string Telefone
-    float Potencia_RSRP
-    int ID_Antena_Conectada
-    float Distancia_Antena_m
-  }
-
-  gold_churn_risk_daily {
-    int gold_row_id PK
-    string Data_Referencia
-    string Telefone
-    boolean Desistencia
-    float Receita_Em_Risco
-    boolean Afetado_Tempestade
-  }
+    gold_network_events_hourly {
+        timestamp bucket_hour PK
+        varchar network_type
+        bigint event_count
+        double avg_rsrp
+        double avg_sinr
+        bigint poor_signal_count
+        timestamp updated_at
+    }
 ```
 
-## Legenda
-
-| Símbolo / termo | Significado |
-|-----------------|-------------|
-| PK | Chave primária ou natural (`event_id`; gold: `bucket_hour` + `network_type`) |
-| MERGE | Escrita idempotente no streaming |
-| Linha tracejada (fluxo) | Metadata / watermark, sem FK no Iceberg |
-| phone_number | Relação lógica entre tabelas batch |
+**Gold — grão:** `network_events_hourly` → `bucket_hour` + `network_type`.

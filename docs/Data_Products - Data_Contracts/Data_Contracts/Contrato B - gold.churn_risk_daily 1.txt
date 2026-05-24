@@ -1,0 +1,93 @@
+# ================ #
+# DATA CONTRACT B  #
+# Versão activa: v1.0.0 — ver v1/ e histórico v0/
+# Alinhamento operacional (batch estático): v2/ (v1.1.0) — ver COMPARACAO_v1_v2.md
+# ================ #
+
+# ==============================================================================
+# DATA CONTRACT: Risco de Churn Diário (implementação Trino/Iceberg)
+# ==============================================================================
+contract:
+  id: gold.churn_risk_daily
+  version: 1.0.0
+  applies_to_product: gold.churn_risk_daily
+  catalog_table: iceberg.gold.churn_risk_daily
+  status: active
+
+interface:
+  grain: "1 linha por (Telefone, Data_Referencia)"
+  primary_key: ["Telefone", "Data_Referencia"]
+  notes: >
+    Uma linha por cliente CDR por dia com actividade em call_tests ou network_logs.
+    gold_row_id é surrogate key técnica.
+
+schema:
+  - name: gold_row_id
+    type: bigint
+    nullable: false
+  - name: Data_Referencia
+    type: date
+    nullable: false
+    description: "Dia de actividade (união de datas em call_tests e network_logs)."
+  - name: Telefone
+    type: varchar
+    nullable: false
+    description: "phone_number do CDR (chave de negócio)."
+  - name: Afetado_Tempestade
+    type: boolean
+    nullable: false
+    description: "TRUE se nesse dia existiu log com longitude > -8.80 (zona Leste)."
+  - name: Receita_Em_Risco
+    type: double
+    nullable: true
+    description: "Soma day_charge + eve_charge + night_charge + intl_charge (CDR silver)."
+  - name: Tempo_Subscrito
+    type: integer
+    nullable: true
+    description: "account_length (dias)."
+  - name: Total_Chamadas_Suporte
+    type: integer
+    nullable: true
+    description: "custserv_calls do CDR."
+  - name: Total_Drops
+    type: bigint
+    nullable: true
+    description: "COUNT_IF(result=FALSE) nos call_tests do dia."
+  - name: Qualidade_Audio_MOS
+    type: double
+    nullable: true
+    description: "AVG(mos) nos call_tests do dia."
+  - name: Desistencia
+    type: boolean
+    nullable: true
+    description: "churn do CDR (variável alvo)."
+
+semantics:
+  definitions:
+    Receita_Em_Risco: >
+      day_charge + eve_charge + night_charge + intl_charge (implementado em build_gold_churn_risk).
+      Não inclui projeção a 30 dias; representa receita diária facturada do cliente.
+    Afetado_Tempestade: "bool_or(longitude > -8.80) nos network_logs do Telefone na Data_Referencia."
+
+quality:
+  constraints:
+    - rule: "uniqueness(Telefone, Data_Referencia) == 100%"
+      severity: error
+    - rule: "Qualidade_Audio_MOS IS NULL OR (Qualidade_Audio_MOS BETWEEN 1.0 AND 5.0)"
+      severity: error
+    - rule: "no_nulls(Telefone, Data_Referencia)"
+      severity: error
+  slo:
+    freshness: "P95 <= 4h após fim do dia civil (batch Flyte após avaliar_silver)"
+
+change_management:
+  compatibility_rules:
+    - change: "add_nullable_column"
+      version_bump: minor
+      compatibility: backward
+    - change: "rename_column"
+      version_bump: major
+      compatibility: breaking
+  late_data_policy:
+    allowed_lateness: "3 days"
+    correction_strategy: "rebuild gold via acid_replace (DELETE+INSERT transaccional)"

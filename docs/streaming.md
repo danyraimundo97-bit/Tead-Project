@@ -19,7 +19,7 @@ Producer (host) ──► Redpanda (network_events)
 
 O pipeline batch existente (`jdpt_lakehouse_pipeline`) **não é substituído** — convive com este fluxo.
 
-Diagramas ER: [lakehouse_er.md](lakehouse_er.md). Fluxos: [lakehouse_tables.md](lakehouse_tables.md).
+Tabelas por camada: [lakehouse_tables.md](lakehouse_tables.md).
 
 ## Idempotência e retries
 

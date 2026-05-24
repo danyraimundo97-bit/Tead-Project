@@ -1,0 +1,446 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_batch_jdpt" targetNamespace="http://jdpt.pt/bpmn/batch" exporter="Camunda Modeler" exporterVersion="5.47.0">
+  <bpmn:process id="Process_jdpt_lakehouse_pipeline" name="jdpt_lakehouse_pipeline" isExecutable="false">
+    <bpmn:documentation>Pipeline batch Flyte — reconstrução manual Silver + Gold. Limpeza numérica, circuit breaker 5% e quarentena Iceberg.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_batch">
+      <bpmn:lane id="Layer_ops" name="Layer: Operação">
+        <bpmn:flowNodeRef>StartEvent_manual</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_prep_silver" name="Layer: Preparação Silver">
+        <bpmn:flowNodeRef>Task_ensure_silver</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_bronze_silver" name="Layer: Bronze → Silver (paralelo)">
+        <bpmn:flowNodeRef>Gateway_fork_silver</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_process_cdr</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_process_logs</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_process_tests</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_process_towers</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_join_silver</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_quarantine" name="Layer: Quarentena Silver">
+        <bpmn:flowNodeRef>Task_q_cdr</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_q_logs</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_q_tests</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_q_towers</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_qa_silver" name="Layer: Qualidade Silver">
+        <bpmn:flowNodeRef>Task_avaliar_silver</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_silver_ok</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_silver_fail</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_prep_gold" name="Layer: Preparação Gold">
+        <bpmn:flowNodeRef>Task_ensure_gold</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_silver_gold" name="Layer: Silver → Gold (paralelo)">
+        <bpmn:flowNodeRef>Gateway_fork_gold</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_build_network</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_build_churn</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_join_gold</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_qa_gold" name="Layer: Qualidade Gold">
+        <bpmn:flowNodeRef>Task_avaliar_gold</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_gold_ok</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>EndEvent_gold_fail</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Layer_consumo" name="Layer: Consumo">
+        <bpmn:flowNodeRef>EndEvent_success</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="StartEvent_manual" name="Disparo manual via Flyte">
+      <bpmn:outgoing>Flow_start_envS</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="Task_ensure_silver" name="ensure_silver_layer_environment">
+      <bpmn:documentation>MinIO bronze + DDL Iceberg silver (incl. *_quarantine_raw / *_quarantine_audit)</bpmn:documentation>
+      <bpmn:incoming>Flow_start_envS</bpmn:incoming>
+      <bpmn:outgoing>Flow_envS_fork</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gateway_fork_silver" name="Fork">
+      <bpmn:incoming>Flow_envS_fork</bpmn:incoming>
+      <bpmn:outgoing>Flow_042sbk0</bpmn:outgoing>
+      <bpmn:outgoing>Flow_1cs85zj</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_process_cdr" name="process_cdr_to_silver">
+      <bpmn:documentation>Limpeza + circuit breaker 5% + quarentena + ACID → cdr_customers</bpmn:documentation>
+      <bpmn:incoming>Flow_042sbk0</bpmn:incoming>
+      <bpmn:outgoing>Flow_1yp95ke</bpmn:outgoing>
+      <bpmn:outgoing>Flow_0z5689c</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_process_logs" name="process_logs_to_silver">
+      <bpmn:documentation>Limpeza + circuit breaker 5% + quarentena + ACID → network_logs</bpmn:documentation>
+      <bpmn:incoming>Flow_1cs85zj</bpmn:incoming>
+      <bpmn:outgoing>Flow_10v7hoj</bpmn:outgoing>
+      <bpmn:outgoing>Flow_0z5xpfp</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_process_tests" name="process_call_tests_to_silver">
+      <bpmn:documentation>Limpeza + circuit breaker 5% + quarentena + ACID → call_tests</bpmn:documentation>
+      <bpmn:incoming>Flow_0z5689c</bpmn:incoming>
+      <bpmn:outgoing>Flow_1saot63</bpmn:outgoing>
+      <bpmn:outgoing>Flow_0tc5g2q</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_process_towers" name="process_towers_to_silver">
+      <bpmn:documentation>Limpeza + circuit breaker 5% + quarentena + ACID → towers</bpmn:documentation>
+      <bpmn:incoming>Flow_0z5xpfp</bpmn:incoming>
+      <bpmn:outgoing>Flow_0wbfu0u</bpmn:outgoing>
+      <bpmn:outgoing>Flow_1dhfehk</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_q_cdr" name="cdr_quarantine_raw + audit">
+      <bpmn:documentation>iceberg.silver.cdr_quarantine_raw / cdr_quarantine_audit</bpmn:documentation>
+      <bpmn:incoming>Flow_10v7hoj</bpmn:incoming>
+    </bpmn:task>
+    <bpmn:task id="Task_q_logs" name="network_logs_quarantine_raw + audit">
+      <bpmn:documentation>iceberg.silver.network_logs_quarantine_raw / network_logs_quarantine_audit</bpmn:documentation>
+      <bpmn:incoming>Flow_1yp95ke</bpmn:incoming>
+    </bpmn:task>
+    <bpmn:task id="Task_q_tests" name="call_tests_quarantine_raw + audit">
+      <bpmn:documentation>iceberg.silver.call_tests_quarantine_raw / call_tests_quarantine_audit</bpmn:documentation>
+      <bpmn:incoming>Flow_0wbfu0u</bpmn:incoming>
+    </bpmn:task>
+    <bpmn:task id="Task_q_towers" name="towers_quarantine_raw + audit">
+      <bpmn:documentation>iceberg.silver.towers_quarantine_raw / towers_quarantine_audit</bpmn:documentation>
+      <bpmn:incoming>Flow_0tc5g2q</bpmn:incoming>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gateway_join_silver">
+      <bpmn:incoming>Flow_1dhfehk</bpmn:incoming>
+      <bpmn:incoming>Flow_1saot63</bpmn:incoming>
+      <bpmn:outgoing>Flow_1ublejk</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_avaliar_silver" name="avaliar_silver">
+      <bpmn:documentation>Auditoria em log (não bloqueia)</bpmn:documentation>
+      <bpmn:incoming>Flow_1ublejk</bpmn:incoming>
+      <bpmn:outgoing>Flow_evalS_gw</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:exclusiveGateway id="Gateway_silver_ok" name="Tasks Silver OK?" default="Flow_silver_fail">
+      <bpmn:incoming>Flow_evalS_gw</bpmn:incoming>
+      <bpmn:outgoing>Flow_silver_ok</bpmn:outgoing>
+      <bpmn:outgoing>Flow_silver_fail</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="EndEvent_silver_fail" name="Pipeline bloqueado">
+      <bpmn:incoming>Flow_silver_fail</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:task id="Task_ensure_gold" name="ensure_gold_layer_environment">
+      <bpmn:documentation>DDL gold + partitioning Iceberg</bpmn:documentation>
+      <bpmn:incoming>Flow_silver_ok</bpmn:incoming>
+      <bpmn:outgoing>Flow_1spfh71</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gateway_fork_gold" name="Fork">
+      <bpmn:incoming>Flow_1spfh71</bpmn:incoming>
+      <bpmn:outgoing>Flow_17o0o4e</bpmn:outgoing>
+      <bpmn:outgoing>Flow_1yfnkbx</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_build_network" name="build_gold_network_quality">
+      <bpmn:documentation>Produto A — network_quality_daily (ACID)</bpmn:documentation>
+      <bpmn:incoming>Flow_17o0o4e</bpmn:incoming>
+      <bpmn:outgoing>Flow_1y4qyyx</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_build_churn" name="build_gold_churn_risk">
+      <bpmn:documentation>Produto B — churn_risk_daily (ACID)</bpmn:documentation>
+      <bpmn:incoming>Flow_1yfnkbx</bpmn:incoming>
+      <bpmn:outgoing>Flow_0tub4cd</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gateway_join_gold">
+      <bpmn:incoming>Flow_1y4qyyx</bpmn:incoming>
+      <bpmn:incoming>Flow_0tub4cd</bpmn:incoming>
+      <bpmn:outgoing>Flow_0o22q2o</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_avaliar_gold" name="avaliar_gold">
+      <bpmn:documentation>Auditoria em log (não bloqueia)</bpmn:documentation>
+      <bpmn:incoming>Flow_0o22q2o</bpmn:incoming>
+      <bpmn:outgoing>Flow_evalG_gw</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:exclusiveGateway id="Gateway_gold_ok" name="Tasks Gold OK?">
+      <bpmn:incoming>Flow_evalG_gw</bpmn:incoming>
+      <bpmn:outgoing>Flow_0fpbzao</bpmn:outgoing>
+      <bpmn:outgoing>Flow_19r6ecj</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="EndEvent_gold_fail" name="Pipeline bloqueado">
+      <bpmn:incoming>Flow_0fpbzao</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndEvent_success" name="Snapshot Gold disponível">
+      <bpmn:incoming>Flow_19r6ecj</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_start_envS" sourceRef="StartEvent_manual" targetRef="Task_ensure_silver" />
+    <bpmn:sequenceFlow id="Flow_envS_fork" sourceRef="Task_ensure_silver" targetRef="Gateway_fork_silver" />
+    <bpmn:sequenceFlow id="Flow_evalS_gw" sourceRef="Task_avaliar_silver" targetRef="Gateway_silver_ok" />
+    <bpmn:sequenceFlow id="Flow_silver_ok" name="Sim" sourceRef="Gateway_silver_ok" targetRef="Task_ensure_gold" />
+    <bpmn:sequenceFlow id="Flow_silver_fail" name="Não" sourceRef="Gateway_silver_ok" targetRef="EndEvent_silver_fail" />
+    <bpmn:sequenceFlow id="Flow_evalG_gw" sourceRef="Task_avaliar_gold" targetRef="Gateway_gold_ok" />
+    <bpmn:sequenceFlow id="Flow_042sbk0" sourceRef="Gateway_fork_silver" targetRef="Task_process_cdr" />
+    <bpmn:sequenceFlow id="Flow_1cs85zj" sourceRef="Gateway_fork_silver" targetRef="Task_process_logs" />
+    <bpmn:sequenceFlow id="Flow_10v7hoj" sourceRef="Task_process_logs" targetRef="Task_q_cdr" />
+    <bpmn:sequenceFlow id="Flow_1yp95ke" sourceRef="Task_process_cdr" targetRef="Task_q_logs" />
+    <bpmn:sequenceFlow id="Flow_0wbfu0u" sourceRef="Task_process_towers" targetRef="Task_q_tests" />
+    <bpmn:sequenceFlow id="Flow_1dhfehk" sourceRef="Task_process_towers" targetRef="Gateway_join_silver" />
+    <bpmn:sequenceFlow id="Flow_1saot63" sourceRef="Task_process_tests" targetRef="Gateway_join_silver" />
+    <bpmn:sequenceFlow id="Flow_0z5689c" sourceRef="Task_process_cdr" targetRef="Task_process_tests" />
+    <bpmn:sequenceFlow id="Flow_0z5xpfp" sourceRef="Task_process_logs" targetRef="Task_process_towers" />
+    <bpmn:sequenceFlow id="Flow_0tc5g2q" sourceRef="Task_process_tests" targetRef="Task_q_towers" />
+    <bpmn:sequenceFlow id="Flow_1ublejk" sourceRef="Gateway_join_silver" targetRef="Task_avaliar_silver" />
+    <bpmn:sequenceFlow id="Flow_1spfh71" sourceRef="Task_ensure_gold" targetRef="Gateway_fork_gold" />
+    <bpmn:sequenceFlow id="Flow_1y4qyyx" sourceRef="Task_build_network" targetRef="Gateway_join_gold" />
+    <bpmn:sequenceFlow id="Flow_0tub4cd" sourceRef="Task_build_churn" targetRef="Gateway_join_gold" />
+    <bpmn:sequenceFlow id="Flow_17o0o4e" sourceRef="Gateway_fork_gold" targetRef="Task_build_network" />
+    <bpmn:sequenceFlow id="Flow_1yfnkbx" sourceRef="Gateway_fork_gold" targetRef="Task_build_churn" />
+    <bpmn:sequenceFlow id="Flow_0o22q2o" sourceRef="Gateway_join_gold" targetRef="Task_avaliar_gold" />
+    <bpmn:sequenceFlow id="Flow_0fpbzao" sourceRef="Gateway_gold_ok" targetRef="EndEvent_gold_fail" />
+    <bpmn:sequenceFlow id="Flow_19r6ecj" sourceRef="Gateway_gold_ok" targetRef="EndEvent_success" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_batch">
+    <bpmndi:BPMNPlane id="BPMNPlane_batch" bpmnElement="Process_jdpt_lakehouse_pipeline">
+      <bpmndi:BPMNShape id="Layer_consumo_di" bpmnElement="Layer_consumo" isHorizontal="true">
+        <dc:Bounds x="160" y="970" width="2280" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_qa_gold_di" bpmnElement="Layer_qa_gold" isHorizontal="true">
+        <dc:Bounds x="160" y="870" width="2280" height="100" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_silver_gold_di" bpmnElement="Layer_silver_gold" isHorizontal="true">
+        <dc:Bounds x="160" y="710" width="2280" height="160" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_prep_gold_di" bpmnElement="Layer_prep_gold" isHorizontal="true">
+        <dc:Bounds x="160" y="630" width="2280" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_qa_silver_di" bpmnElement="Layer_qa_silver" isHorizontal="true">
+        <dc:Bounds x="160" y="530" width="2280" height="100" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_quarantine_di" bpmnElement="Layer_quarantine" isHorizontal="true">
+        <dc:Bounds x="160" y="420" width="2280" height="110" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_bronze_silver_di" bpmnElement="Layer_bronze_silver" isHorizontal="true">
+        <dc:Bounds x="160" y="240" width="2280" height="180" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_prep_silver_di" bpmnElement="Layer_prep_silver" isHorizontal="true">
+        <dc:Bounds x="160" y="160" width="2280" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Layer_ops_di" bpmnElement="Layer_ops" isHorizontal="true">
+        <dc:Bounds x="160" y="80" width="2280" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_manual_di" bpmnElement="StartEvent_manual">
+        <dc:Bounds x="242" y="102" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="218" y="145" width="85" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ensure_silver_di" bpmnElement="Task_ensure_silver">
+        <dc:Bounds x="330" y="175" width="200" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_fork_silver_di" bpmnElement="Gateway_fork_silver" isMarkerVisible="true">
+        <dc:Bounds x="485" y="305" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="453" y="323" width="22" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_process_cdr_di" bpmnElement="Task_process_cdr">
+        <dc:Bounds x="590" y="255" width="180" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_process_logs_di" bpmnElement="Task_process_logs">
+        <dc:Bounds x="590" y="345" width="180" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_process_tests_di" bpmnElement="Task_process_tests">
+        <dc:Bounds x="810" y="255" width="200" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_process_towers_di" bpmnElement="Task_process_towers">
+        <dc:Bounds x="810" y="345" width="200" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_q_cdr_di" bpmnElement="Task_q_cdr">
+        <dc:Bounds x="520" y="448" width="155" height="55" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_q_logs_di" bpmnElement="Task_q_logs">
+        <dc:Bounds x="695" y="448" width="155" height="55" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_q_tests_di" bpmnElement="Task_q_tests">
+        <dc:Bounds x="870" y="448" width="175" height="55" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_q_towers_di" bpmnElement="Task_q_towers">
+        <dc:Bounds x="1065" y="448" width="175" height="55" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_join_silver_di" bpmnElement="Gateway_join_silver" isMarkerVisible="true">
+        <dc:Bounds x="1055" y="305" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_avaliar_silver_di" bpmnElement="Task_avaliar_silver">
+        <dc:Bounds x="1150" y="540" width="140" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_silver_ok_di" bpmnElement="Gateway_silver_ok" isMarkerVisible="true">
+        <dc:Bounds x="1325" y="550" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1308" y="526" width="84" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_silver_fail_di" bpmnElement="EndEvent_silver_fail">
+        <dc:Bounds x="1332" y="650" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1308" y="693" width="85" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ensure_gold_di" bpmnElement="Task_ensure_gold">
+        <dc:Bounds x="1420" y="635" width="190" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_fork_gold_di" bpmnElement="Gateway_fork_gold" isMarkerVisible="true">
+        <dc:Bounds x="1665" y="755" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1633" y="773" width="22" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_build_network_di" bpmnElement="Task_build_network">
+        <dc:Bounds x="1760" y="715" width="190" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_build_churn_di" bpmnElement="Task_build_churn">
+        <dc:Bounds x="1760" y="805" width="190" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_join_gold_di" bpmnElement="Gateway_join_gold" isMarkerVisible="true">
+        <dc:Bounds x="1995" y="755" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_avaliar_gold_di" bpmnElement="Task_avaliar_gold">
+        <dc:Bounds x="2090" y="880" width="140" height="60" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_gold_ok_di" bpmnElement="Gateway_gold_ok" isMarkerVisible="true">
+        <dc:Bounds x="2265" y="890" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2250" y="866" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_gold_fail_di" bpmnElement="EndEvent_gold_fail">
+        <dc:Bounds x="2272" y="990" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2248" y="1033" width="85" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_success_di" bpmnElement="EndEvent_success">
+        <dc:Bounds x="2362" y="992" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2328" y="1035" width="105" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_start_envS_di" bpmnElement="Flow_start_envS">
+        <di:waypoint x="277" y="113" />
+        <di:waypoint x="304" y="113" />
+        <di:waypoint x="304" y="205" />
+        <di:waypoint x="330" y="205" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_envS_fork_di" bpmnElement="Flow_envS_fork">
+        <di:waypoint x="430" y="235" />
+        <di:waypoint x="430" y="270" />
+        <di:waypoint x="510" y="270" />
+        <di:waypoint x="510" y="305" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_evalS_gw_di" bpmnElement="Flow_evalS_gw">
+        <di:waypoint x="1290" y="570" />
+        <di:waypoint x="1325" y="575" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_silver_ok_di" bpmnElement="Flow_silver_ok">
+        <di:waypoint x="1359" y="559" />
+        <di:waypoint x="1515" y="559" />
+        <di:waypoint x="1515" y="635" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1495" y="580" width="19" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_silver_fail_di" bpmnElement="Flow_silver_fail">
+        <di:waypoint x="1350" y="600" />
+        <di:waypoint x="1350" y="650" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1358" y="620" width="20" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_evalG_gw_di" bpmnElement="Flow_evalG_gw">
+        <di:waypoint x="2230" y="910" />
+        <di:waypoint x="2265" y="915" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_042sbk0_di" bpmnElement="Flow_042sbk0">
+        <di:waypoint x="510" y="305" />
+        <di:waypoint x="510" y="285" />
+        <di:waypoint x="590" y="285" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1cs85zj_di" bpmnElement="Flow_1cs85zj">
+        <di:waypoint x="510" y="355" />
+        <di:waypoint x="510" y="375" />
+        <di:waypoint x="590" y="375" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10v7hoj_di" bpmnElement="Flow_10v7hoj">
+        <di:waypoint x="660" y="405" />
+        <di:waypoint x="660" y="427" />
+        <di:waypoint x="581" y="427" />
+        <di:waypoint x="581" y="448" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1yp95ke_di" bpmnElement="Flow_1yp95ke">
+        <di:waypoint x="742" y="315" />
+        <di:waypoint x="773" y="330" />
+        <di:waypoint x="773" y="448" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0wbfu0u_di" bpmnElement="Flow_0wbfu0u">
+        <di:waypoint x="910" y="405" />
+        <di:waypoint x="910" y="427" />
+        <di:waypoint x="958" y="427" />
+        <di:waypoint x="958" y="448" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1dhfehk_di" bpmnElement="Flow_1dhfehk">
+        <di:waypoint x="1010" y="375" />
+        <di:waypoint x="1080" y="375" />
+        <di:waypoint x="1080" y="355" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1saot63_di" bpmnElement="Flow_1saot63">
+        <di:waypoint x="1010" y="285" />
+        <di:waypoint x="1080" y="285" />
+        <di:waypoint x="1080" y="305" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0z5689c_di" bpmnElement="Flow_0z5689c">
+        <di:waypoint x="770" y="285" />
+        <di:waypoint x="810" y="285" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0z5xpfp_di" bpmnElement="Flow_0z5xpfp">
+        <di:waypoint x="770" y="375" />
+        <di:waypoint x="810" y="375" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0tc5g2q_di" bpmnElement="Flow_0tc5g2q">
+        <di:waypoint x="1010" y="285" />
+        <di:waypoint x="1050" y="285" />
+        <di:waypoint x="1050" y="476" />
+        <di:waypoint x="1065" y="476" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1ublejk_di" bpmnElement="Flow_1ublejk">
+        <di:waypoint x="1105" y="330" />
+        <di:waypoint x="1260" y="330" />
+        <di:waypoint x="1260" y="540" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1spfh71_di" bpmnElement="Flow_1spfh71">
+        <di:waypoint x="1610" y="665" />
+        <di:waypoint x="1690" y="665" />
+        <di:waypoint x="1690" y="755" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1y4qyyx_di" bpmnElement="Flow_1y4qyyx">
+        <di:waypoint x="1950" y="745" />
+        <di:waypoint x="1973" y="745" />
+        <di:waypoint x="1973" y="780" />
+        <di:waypoint x="1995" y="780" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0tub4cd_di" bpmnElement="Flow_0tub4cd">
+        <di:waypoint x="1950" y="835" />
+        <di:waypoint x="2020" y="835" />
+        <di:waypoint x="2020" y="805" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_17o0o4e_di" bpmnElement="Flow_17o0o4e">
+        <di:waypoint x="1715" y="780" />
+        <di:waypoint x="1738" y="780" />
+        <di:waypoint x="1738" y="745" />
+        <di:waypoint x="1760" y="745" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1yfnkbx_di" bpmnElement="Flow_1yfnkbx">
+        <di:waypoint x="1690" y="805" />
+        <di:waypoint x="1690" y="835" />
+        <di:waypoint x="1760" y="835" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0o22q2o_di" bpmnElement="Flow_0o22q2o">
+        <di:waypoint x="2020" y="805" />
+        <di:waypoint x="2020" y="910" />
+        <di:waypoint x="2090" y="910" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0fpbzao_di" bpmnElement="Flow_0fpbzao">
+        <di:waypoint x="2290" y="940" />
+        <di:waypoint x="2290" y="990" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_19r6ecj_di" bpmnElement="Flow_19r6ecj">
+        <di:waypoint x="2315" y="915" />
+        <di:waypoint x="2380" y="915" />
+        <di:waypoint x="2380" y="992" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
