@@ -9,7 +9,7 @@ from flytekit import ImageSpec, Resources, task
 from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
-from workflow_functions.trino_acid import replace_table_transaction
+from workflow_functions.iceberg_replace import replace_iceberg_table
 
 logger = get_logger(__name__)
 
@@ -269,18 +269,12 @@ def process_cdr_to_silver() -> str:
         )
         cur.fetchall()
 
-        replace_table_transaction(
+        replace_iceberg_table(
             conn,
             table_fqn="iceberg.silver.cdr_customers",
-            insert_sql="""
-            INSERT INTO iceberg.silver.cdr_customers (
-                silver_row_id, phone_number, account_length, vmail_message, day_mins, day_calls,
-                day_charge, eve_mins, eve_calls, eve_charge, night_mins, night_calls, night_charge,
-                intl_mins, intl_calls, intl_charge, custserv_calls, churn
-            )
+            select_sql="""
             SELECT
-                (SELECT COALESCE(MAX(silver_row_id), CAST(0 AS BIGINT)) FROM iceberg.silver.cdr_customers)
-                    + ROW_NUMBER() OVER (ORDER BY phone_number),
+                ROW_NUMBER() OVER (ORDER BY phone_number) AS silver_row_id,
                 phone_number, account_length, vmail_message, day_mins, day_calls, day_charge,
                 eve_mins, eve_calls, eve_charge, night_mins, night_calls, night_charge,
                 intl_mins, intl_calls, intl_charge, custserv_calls, churn

@@ -1,12 +1,8 @@
 # ================ #
 # DATA PRODUCT B   #
-# Versão activa: v1.0.0 — ver v1/ e histórico v0/
-# Alinhamento operacional (batch estático): v2/ (v1.1.0) — ver COMPARACAO_v1_v2.md
+# Versão: v1.2.0 (colunas snake_case)
+# Comparação: ../COMPARACAO_v1_v2.md
 # ================ #
-
-# Produto B: Painel de Retenção e Risco de Churn
-# Grão: 1 linha por cliente (Telefone) por dia
-# Tabela: iceberg.gold.churn_risk_daily
 
 product:
   id: gold.churn_risk_daily
@@ -38,8 +34,8 @@ delivery:
     bucket: warehouse
     table_identifier: iceberg.gold.churn_risk_daily
     partitions:
-      - Data_Referencia
-    update_mode: acid_replace
+      - data_referencia
+    update_mode: create_or_replace
   serving:
     query_engine: trino
     stable_views:
@@ -49,10 +45,15 @@ production:
   orchestrator: flyte
   workflow: jdpt_lakehouse_pipeline
   task: build_gold_churn_risk
-  schedule: "0 4 * * *"
+  trigger: manual
+  execution_model: static_rebuild
+  schedule: null
+  notes: >
+    Cenário académico TEAD: snapshot estático do período pós-tempestade (jan.–fev. 2026).
+    Pipeline disparado manualmente via Flyte; não há agendamento recorrente.
   backfills:
     supported: true
-    unit: day
+    unit: full_pipeline_rerun
 
 lineage:
   sources:
@@ -69,4 +70,5 @@ governance:
       - data_scientists
 
 references:
-  contract_file: v1/Contrato B - gold.churn_risk_daily.txt
+  contract_file: v2/Contrato B - gold.churn_risk_daily.txt
+  based_on_product: v1/Produto B - gold.churn_risk_daily.txt

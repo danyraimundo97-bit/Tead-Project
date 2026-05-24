@@ -1,7 +1,6 @@
 # ================ #
 # DATA PRODUCT A   #
-# Versão: v1.1.0 (batch estático — alinhamento operacional)
-# Base schema: v1/Produto A - gold.network_quality_daily.txt
+# Versão: v1.2.0 (colunas snake_case)
 # Comparação: ../COMPARACAO_v1_v2.md
 # ================ #
 
@@ -30,17 +29,17 @@ delivery:
     bucket: warehouse
     table_identifier: iceberg.gold.network_quality_daily
     partitions:
-      - day("Data_Hora")
-    update_mode: acid_replace
+      - day(data_hora)
+    update_mode: create_or_replace
   serving:
     query_engine: trino
     stable_views:
       - iceberg.gold.vw_storm_impact_executive
     example_query: >
-      SELECT "Data_Hora", "Zona_Leiria", "ID_Antena_Conectada", "Potencia_RSRP",
-             "Estado_Antena", "Telefones_Falha"
+      SELECT data_hora, zona_leiria, id_antena_conectada, potencia_rsrp,
+             estado_antena, telefones_falha
       FROM iceberg.gold.network_quality_daily
-      WHERE "Estado_Antena" = FALSE;
+      WHERE estado_antena = FALSE;
 
 production:
   orchestrator: flyte

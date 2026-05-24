@@ -309,18 +309,18 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
         """
         CREATE TABLE IF NOT EXISTS iceberg.gold.churn_risk_daily (
             gold_row_id BIGINT NOT NULL,
-            "Data_Referencia" DATE,
-            "Telefone" VARCHAR,
-            "Afetado_Tempestade" BOOLEAN,
-            "Receita_Em_Risco" DOUBLE,
-            "Tempo_Subscrito" INTEGER,
-            "Total_Chamadas_Suporte" INTEGER,
-            "Total_Drops" BIGINT,
-            "Qualidade_Audio_MOS" DOUBLE,
-            "Desistencia" BOOLEAN
+            data_referencia DATE,
+            telefone VARCHAR,
+            afetado_tempestade BOOLEAN,
+            receita_em_risco DOUBLE,
+            tempo_subscrito INTEGER,
+            total_chamadas_suporte INTEGER,
+            total_drops BIGINT,
+            qualidade_audio_mos DOUBLE,
+            desistencia BOOLEAN
         ) WITH (
             format = 'PARQUET',
-            partitioning = ARRAY['"Data_Referencia"']
+            partitioning = ARRAY['data_referencia']
         )
         """
     )
@@ -330,26 +330,26 @@ def ensure_gold_schemas_and_iceberg_tables(cur) -> None:
         """
         CREATE TABLE IF NOT EXISTS iceberg.gold.network_quality_daily (
             gold_row_id BIGINT NOT NULL,
-            "Data_Hora" TIMESTAMP(3),
-            "Zona_Leiria" VARCHAR,
-            "Latitude_Ocorrencia" DOUBLE,
-            "Longitude_Ocorrencia" DOUBLE,
-            "Torre_Latitude" DOUBLE,
-            "Torre_Longitude" DOUBLE,
-            "ID_Antena_Conectada" BIGINT,
-            "Estado_Antena" BOOLEAN,
-            "Distancia_Antena_m" DOUBLE,
-            "Tecnologia_Rede" VARCHAR,
-            "Potencia_RSRP" DOUBLE,
-            "Qualidade_RSRQ" DOUBLE,
-            "Ruido_SINR" DOUBLE,
-            "Velocidade_Downlink" DOUBLE,
-            "Telefones_Sucesso" BIGINT,
-            "Telefones_Falha" BIGINT,
-            "Telefones_Sem_Teste" BIGINT
+            data_hora TIMESTAMP(3),
+            zona_leiria VARCHAR,
+            latitude_ocorrencia DOUBLE,
+            longitude_ocorrencia DOUBLE,
+            torre_latitude DOUBLE,
+            torre_longitude DOUBLE,
+            id_antena_conectada BIGINT,
+            estado_antena BOOLEAN,
+            distancia_antena_m DOUBLE,
+            tecnologia_rede VARCHAR,
+            potencia_rsrp DOUBLE,
+            qualidade_rsrq DOUBLE,
+            ruido_sinr DOUBLE,
+            velocidade_downlink DOUBLE,
+            telefones_sucesso BIGINT,
+            telefones_falha BIGINT,
+            telefones_sem_teste BIGINT
         ) WITH (
             format = 'PARQUET',
-            partitioning = ARRAY['day("Data_Hora")']
+            partitioning = ARRAY['day(data_hora)']
         )
         """
     )

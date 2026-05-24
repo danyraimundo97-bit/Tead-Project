@@ -144,11 +144,10 @@ O detalhe exaustivo de cada transformação --- regras por dataset, problemas co
 Na fase de \textit{Data Preparation} do CRISP-DM, a camada \textit{Silver} fornece tabelas limpas e alinhadas semanticamente, mas ainda orientadas a engenharia de dados. A passagem para a camada \textit{Gold} agrega, enriquece e expõe \textit{Data Products} prontos para consumo em BI e ML, governados por contratos versionados (v1.0.0). Em traços gerais:
 
 \begin{itemize}
-    \item \textbf{Nomes em linguagem de negócio} (\texttt{Telefone}, \texttt{Receita\_Em\_Risco}, \texttt{Estado\_Antena}) em vez de identificadores técnicos da \textit{Silver}.
-    \item \textbf{Grão fixo por tabela} --- torre $\times$ dia civil no Produto~A; cliente $\times$ dia no Produto~B.
+    \item \textbf{Colunas gold em \texttt{snake\_case}} (contratos v1.2.0), legíveis para BI e compatíveis com particionamento Iceberg no Trino.
+    \item \textbf{Grão fixo por tabela} --- \texttt{(id\_antena\_conectada, data\_hora)} no Produto~A; \texttt{(telefone, data\_referencia)} no Produto~B.
     \item \textbf{Cruzamento geográfico e temporal} --- atribuição Haversine de logs à torre mais próxima, zoneamento de Leiria em quadrantes e marcação de clientes expostos à tempestade.
     \item \textbf{Agregações com filtros 3GPP} para médias de RSRP, RSRQ, SINR e \textit{downlink}, excluindo \textit{outliers} fora de intervalos plausíveis.
-    \item \textbf{Carga ACID em substituição total}, \textit{partitioning} Iceberg por dia e disponibilidade após conclusão bem-sucedida do pipeline \textit{batch} (snapshot estático, sem agendamento recorrente).
 \end{itemize}
 
 
@@ -177,7 +176,7 @@ Para o esquema completo, estratégia de carga \textit{chunked} e KPIs derivados,
 \section{Garantia de Qualidade, Data Contracts e Fiabilidade de Execução}
 \label{sec:qa}
 
-Para além das transformações descritas nas secções anteriores, o projecto implementa verificações automáticas alinhadas com os \textbf{Data Contracts} (v1.0.0): documentos que fixam o \textit{schema}, o grão de cada produto, intervalos válidos para métricas, regras de unicidade e decisões de \textbf{entrega} (particionamento, modo de actualização ACID, partições temporais). Estas verificações correm dentro dos \textit{workflows} Flyte --- sobretudo nas \textit{tasks} de limpeza \textit{Silver}, em \texttt{avaliar\_silver} e \texttt{avaliar\_gold} --- e complementam o que já está definido nos contratos em \texttt{quality.constraints} e \texttt{delivery}.
+Para além das transformações descritas nas secções anteriores, o projecto implementa verificações automáticas alinhadas com os \textbf{Data Contracts} (v1.0.0): documentos que fixam o \textit{schema}, o grão de cada produto, intervalos válidos para métricas, regras de unicidade e decisões de \textbf{entrega} (particionamento, substituição atómica \textit{batch}, partições temporais). Estas verificações correm dentro dos \textit{workflows} Flyte --- sobretudo nas \textit{tasks} de limpeza \textit{Silver}, em \texttt{avaliar\_silver} e \texttt{avaliar\_gold} --- e complementam o que já está definido nos contratos em \texttt{quality.constraints} e \texttt{delivery}.
 
 \subsection{O que verificamos}
 
@@ -191,7 +190,7 @@ Para além das transformações descritas nas secções anteriores, o projecto i
 
 O detalhe por momento do pipeline \textit{batch} encontra-se no \hyperref[anexo:qa_checks]{Anexo \ref*{anexo:qa_checks} - Verificações de Qualidade}.
 
-Se uma verificação crítica falhar --- sobretudo o \textit{circuit breaker} ou um \textit{assert} na carga \textit{Gold} --- o \textit{workflow} interrompe-se e, graças às transacções ACID, os consumidores BI mantêm o \textit{snapshot} anterior intacto. O detalhe das regras por dataset na \textit{Silver} (incluindo quarentena) está no \hyperref[anexo:silver_cleanup]{Anexo \ref*{anexo:silver_cleanup}}; as regras contratuais dos produtos \textit{Gold} encontram-se em \texttt{docs/Data\_Products - Data\_Contracts/}.
+Se uma verificação crítica falhar --- sobretudo o \textit{circuit breaker} ou um \textit{assert} na carga \textit{Gold} --- o \textit{workflow} interrompe-se antes de concluir o \texttt{CREATE OR REPLACE}; os consumidores BI mantêm o \textit{snapshot} Iceberg anterior intacto. O detalhe das regras por dataset na \textit{Silver} (incluindo quarentena) está no \hyperref[anexo:silver_cleanup]{Anexo \ref*{anexo:silver_cleanup}}; as regras contratuais dos produtos \textit{Gold} encontram-se em \texttt{docs/Data\_Products - Data\_Contracts/}.
 
 
 \subsection{Retries, particionamento e desempenho analítico}
@@ -202,10 +201,10 @@ Os contratos descrevem \emph{o que} se entrega; as decisões abaixo descrevem \e
 No \textit{streaming}, falhas transitórias (rede, Trino ocupado) são tratadas com reexecução automática das \textit{tasks} Flyte e novas tentativas nas consultas SQL; o emissor Kafka usa entrega confirmada e publicação idempotente, de modo a que duplicados simulados ou \textit{retries} não corrompam a \textit{bronze}.
 
 \textbf{Particionamento e \textit{partition pruning}.}
-Os produtos \textit{Gold} estão particionados por dia civil (\texttt{Data\_Hora} no Produto~A; \texttt{Data\_Referencia} no Produto~B), conforme documentado nos contratos. Filtros temporais típicos dos \textit{dashboards} --- ``última semana'', ``dia X da tempestade'' --- limitam a leitura às partições relevantes, reduzindo custo no Trino sem exigir que o analista conheça a coluna técnica de partição.
+Os produtos \textit{Gold} estão particionados por dia civil (\texttt{day(data\_hora)} no Produto~A; \texttt{data\_referencia} no Produto~B), conforme documentado nos contratos v1.2.0. Filtros temporais típicos dos \textit{dashboards} --- ``última semana'', ``dia X da tempestade'' --- limitam a leitura às partições relevantes, reduzindo custo no Trino sem exigir que o analista conheça a coluna técnica de partição.
 
 \textbf{Redução de \textit{shuffle} e mitigação de \textit{skew}.}
-O motor SQL move muito volume nos \textit{joins} e agregações. No Produto~A, deduplicam-se torres antes de atribuir cada log à antena mais próxima (Haversine), evitando multiplicar a mesma célula física; os testes de voz são pré-agregados por telefone e dia antes do cruzamento com a matriz torre$\times$dia. No Produto~B, a carga processa \textbf{dia a dia} dentro de uma única transacção, limitando picos de memória quando muitos clientes têm actividade no mesmo período --- mitigação prática de desequilíbrio (\textit{skew}) sem \textit{salting} explícito. O join log$\times$todas as torres continua, por desenho académico, a operação mais pesada do projecto.
+O motor SQL move muito volume nos \textit{joins} e agregações. No Produto~A, deduplicam-se torres antes de atribuir cada log à antena mais próxima (Haversine), evitando multiplicar a mesma célula física; os testes de voz são pré-agregados por telefone e dia antes do cruzamento com a matriz torre$\times$dia. No Produto~B, a carga combina \textbf{dia a dia} num único \texttt{CREATE OR REPLACE} (\texttt{UNION ALL}), limitando picos de memória quando muitos clientes têm actividade no mesmo período --- mitigação prática de desequilíbrio (\textit{skew}) sem \textit{salting} explícito. O join log$\times$todas as torres continua, por desenho académico, a operação mais pesada do projecto.
 
 \textbf{Materialização \textit{vs.} \textit{query-on-read}.}
 Os \textit{Data Products} contratados (Produtos A e B) são \textbf{tabelas materializadas}: o custo dos \textit{joins} e agregações é pago uma vez por execução \textit{batch}, e o Superset consulta um \textit{snapshot} estável. Complementarmente, existe uma \textbf{vista semântica} executiva que cruza qualidade de rede e risco de \textit{churn} \emph{sem duplicar} armazenamento --- a lógica corre no Trino (\textit{query-on-read}) e reflecte sempre o último \textit{snapshot} gold disponível após o pipeline.
@@ -493,7 +492,7 @@ O detalhe completo das transformações aplicadas na passagem da camada \textit{
 \section{Documento de Construção da Camada Gold}
 \label{anexo:gold_build}
 
-O detalhe completo da construção dos \textit{Data Products} da camada \textit{Gold} --- fontes \textit{Silver}, \textit{joins} (incluindo deduplicação de torres e atribuição Haversine), regras de agregação (filtros 3GPP, zoneamento de Leiria, cruzamento com testes de voz e CDR), esquema completo das tabelas \texttt{gold.network\_quality\_daily} e \texttt{gold.churn\_risk\_daily}, KPIs derivados e estratégia de carga ACID --- encontra-se no documento de apoio:
+O detalhe completo da construção dos \textit{Data Products} da camada \textit{Gold} --- fontes \textit{Silver}, \textit{joins} (incluindo deduplicação de torres e atribuição Haversine), regras de agregação (filtros 3GPP, zoneamento de Leiria, cruzamento com testes de voz e CDR), esquema completo das tabelas \texttt{gold.network\_quality\_daily} e \texttt{gold.churn\_risk\_daily}, KPIs derivados e estratégia de carga (\texttt{CREATE OR REPLACE}) --- encontra-se no documento de apoio:
 
 \begin{center}
 \href{\teadrepo/blob/main/docs/Relat%C3%B3rio/Ficheiro%20de%20constru%C3%A7%C3%A3o%20da%20camada%20gold.md}%
@@ -589,7 +588,7 @@ Resumo das práticas de fiabilidade e desempenho (Secção~\ref{sec:qa}, subsec�
 \textbf{Prática} & \textbf{Como aplicámos} & \textbf{Pipeline} \\
 \midrule
 Retries &
-Flyte reexecuta \textit{tasks} \textit{streaming} em falha; Trino repete consultas com espera progressiva; emissor Kafka com confirmação e idempotência. \textit{Batch}: re-run manual, seguro por ACID. &
+Flyte reexecuta \textit{tasks} \textit{streaming} em falha; Trino repete consultas com espera progressiva; emissor Kafka com confirmação e idempotência. \textit{Batch}: re-run manual; falha antes do \texttt{CREATE OR REPLACE} preserva o \textit{snapshot} anterior. &
 \textit{Streaming} (+ emissor); \textit{batch} manual \\
 \addlinespace
 Particionamento &
@@ -601,11 +600,11 @@ Dedup de torres antes do join Haversine; pré-agregação de testes de voz por d
 Produto A \\
 \addlinespace
 Mitigação de \textit{skew} &
-Carga \textit{churn} dia a dia numa transacção; dedup de células físicas evita explosão de linhas no join torre$\times$log. &
+Carga \textit{churn} por dias em \texttt{UNION ALL} num único \texttt{CREATE OR REPLACE}; dedup de células físicas evita explosão de linhas no join torre$\times$log. &
 Produto B; Produto A \\
 \addlinespace
 Materialização &
-Tabelas \texttt{gold.*} materializadas por \textit{batch} ACID; consumo BI repetido sem recomputar \textit{joins}. &
+Tabelas \texttt{gold.*} materializadas por \textit{batch} (\texttt{CREATE OR REPLACE}); consumo BI repetido sem recomputar \textit{joins}. &
 \textit{Batch} \\
 \addlinespace
 \textit{Query-on-read} &

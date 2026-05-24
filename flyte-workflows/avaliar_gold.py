@@ -24,8 +24,8 @@ def avaliar_gold() -> str:
     logger.info("="*65)
 
     try:
-        trino_host = TASK_ENV.get("TRINO_HOST", "localhost")
-        conn = trino.dbapi.connect(host=trino_host, port=8080, user='flyte', catalog='iceberg')
+        trino_host = TASK_ENV["TRINO_HOST"]
+        conn = trino.dbapi.connect(host=trino_host, port=8080, user="flyte", catalog="iceberg")
         cur = conn.cursor()
 
         # --- AUDITORIA: NETWORK QUALITY DAILY ---
@@ -33,10 +33,10 @@ def avaliar_gold() -> str:
         cur.execute("""
             SELECT 
                 COUNT(*) as total_linhas,
-                COUNT(DISTINCT "Data_Hora") as dias_unicos,
-                COUNT(DISTINCT "ID_Antena_Conectada") as antenas_unicas,
-                COUNT_IF("Torre_Latitude" IS NULL OR "Torre_Longitude" IS NULL) as coords_nulls,
-                COUNT_IF("Estado_Antena" = FALSE) as antenas_down
+                COUNT(DISTINCT data_hora) as dias_unicos,
+                COUNT(DISTINCT id_antena_conectada) as antenas_unicas,
+                COUNT_IF(torre_latitude IS NULL OR torre_longitude IS NULL) as coords_nulls,
+                COUNT_IF(estado_antena = FALSE) as antenas_down
             FROM iceberg.gold.network_quality_daily
         """)
         total_net, dias_net, antenas_net, coords_nulls, antenas_down = cur.fetchone()
@@ -64,10 +64,10 @@ def avaliar_gold() -> str:
         cur.execute("""
             SELECT 
                 COUNT(*) as total_linhas,
-                COUNT_IF("Telefone" IS NULL) as null_phones,
-                COUNT_IF("Data_Referencia" IS NULL) as null_dates,
-                COUNT_IF("Desistencia" = TRUE) as total_churners,
-                SUM("Receita_Em_Risco") as valor_em_risco
+                COUNT_IF(telefone IS NULL) as null_phones,
+                COUNT_IF(data_referencia IS NULL) as null_dates,
+                COUNT_IF(desistencia = TRUE) as total_churners,
+                SUM(receita_em_risco) as valor_em_risco
             FROM iceberg.gold.churn_risk_daily
         """)
         total_churn, null_phones, null_dates, total_churners, valor_em_risco = cur.fetchone()

@@ -1,7 +1,6 @@
 # ================ #
 # DATA PRODUCT B   #
-# Versão: v1.1.0 (batch estático — alinhamento operacional)
-# Base schema: v1/Produto B - gold.churn_risk_daily.txt
+# Versão: v1.2.0 (colunas snake_case)
 # Comparação: ../COMPARACAO_v1_v2.md
 # ================ #
 
@@ -35,8 +34,8 @@ delivery:
     bucket: warehouse
     table_identifier: iceberg.gold.churn_risk_daily
     partitions:
-      - Data_Referencia
-    update_mode: acid_replace
+      - data_referencia
+    update_mode: create_or_replace
   serving:
     query_engine: trino
     stable_views:

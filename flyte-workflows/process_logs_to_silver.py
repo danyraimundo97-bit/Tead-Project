@@ -8,7 +8,7 @@ from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
 from workflow_functions.silver_transforms import transform_network_logs_silver_features
-from workflow_functions.trino_acid import replace_table_transaction
+from workflow_functions.iceberg_replace import replace_iceberg_table
 
 logger = get_logger(__name__)
 
@@ -250,19 +250,13 @@ def process_logs_to_silver() -> str:
         )
         cur.fetchall()
 
-        logger.info("Replacing iceberg.silver.network_logs with full batch (ACID)")
-        replace_table_transaction(
+        logger.info("Replacing iceberg.silver.network_logs with full batch (CREATE OR REPLACE)")
+        replace_iceberg_table(
             conn,
             table_fqn="iceberg.silver.network_logs",
-            insert_sql="""
-            INSERT INTO iceberg.silver.network_logs (
-                silver_row_id, timestamp_log, devicemake, devicemodel, network_provider,
-                nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
-                rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,
-                latitude, longitude, phone_number
-            )
+            select_sql="""
             SELECT
-                ROW_NUMBER() OVER (ORDER BY timestamp_log, phone_number),
+                ROW_NUMBER() OVER (ORDER BY timestamp_log, phone_number) AS silver_row_id,
                 timestamp_log, devicemake, devicemodel, network_provider,
                 nt_ohe_lte, nt_ohe_gsm, nt_ohe_umts, nt_ohe_nr, nt_ohe_cdma, nt_ohe_other,
                 rsrp, rsrq, sinr, pci, downlink_mbps, uplink_mbps, velocity_kmh,

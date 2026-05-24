@@ -24,8 +24,8 @@ def avaliar_silver():
     logger.info("="*60)
 
     try:
-        trino_host = TASK_ENV.get("TRINO_HOST", "localhost")
-        conn = trino.dbapi.connect(host=trino_host, port=8080, user='flyte', catalog='iceberg')
+        trino_host = TASK_ENV["TRINO_HOST"]
+        conn = trino.dbapi.connect(host=trino_host, port=8080, user="flyte", catalog="iceberg")
         cur = conn.cursor()
 
         # --- AVALIAÇÃO: NETWORK LOGS (Limites Físicos e Timestamps) ---

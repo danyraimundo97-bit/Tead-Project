@@ -1,7 +1,6 @@
 # ================ #
 # DATA CONTRACT A  #
-# Versão: v1.1.0 (batch estático — alinhamento operacional)
-# Schema idêntico a v1.0.0; alteração apenas em production/SLO.
+# Versão: v1.2.0 (colunas snake_case — particionamento Iceberg)
 # Comparação: ../COMPARACAO_v1_v2.md
 # ================ #
 
@@ -10,21 +9,21 @@
 # ==============================================================================
 contract:
   id: gold.network_quality_daily
-  version: 1.1.0
+  version: 1.2.0
   applies_to_product: gold.network_quality_daily
   catalog_table: iceberg.gold.network_quality_daily
   status: active
-  based_on_version: 1.0.0
-  change_scope: operational_only
+  based_on_version: 1.1.0
+  change_scope: schema_physical_names
   notes: >
-    Interface e schema inalterados face a v1.0.0.
-    v1.1.0 documenta o modelo de execução batch estático (cenário académico TEAD).
+    Colunas físicas em snake_case (requisito do particionamento Trino/Iceberg).
+    Substituição total via CREATE OR REPLACE TABLE (autocommit).
 
 interface:
-  grain: "1 linha por (ID_Antena_Conectada, dia de calendário)"
-  primary_key: ["ID_Antena_Conectada", "Data_Hora"]
+  grain: "1 linha por (id_antena_conectada, dia de calendário)"
+  primary_key: ["id_antena_conectada", "data_hora"]
   notes: >
-    Data_Hora é o início do dia (CAST do snapshot_date da torre).
+    data_hora é o início do dia (CAST do snapshot_date da torre).
     gold_row_id é surrogate key técnica (monotónica).
 
 schema:
@@ -32,77 +31,77 @@ schema:
     type: bigint
     nullable: false
     description: "Chave surrogate técnica (ROW_NUMBER na carga)."
-  - name: Data_Hora
+  - name: data_hora
     type: timestamp(3)
     nullable: false
-    description: "Início do dia de referência (UTC/local conforme bronze)."
-  - name: Zona_Leiria
+    description: "Início do dia de referência."
+  - name: zona_leiria
     type: varchar
     nullable: true
     description: "Quadrante geográfico derivado das coordenadas da torre."
-  - name: Latitude_Ocorrencia
+  - name: latitude_ocorrencia
     type: double
     nullable: true
-  - name: Longitude_Ocorrencia
+  - name: longitude_ocorrencia
     type: double
     nullable: true
-  - name: Torre_Latitude
+  - name: torre_latitude
     type: double
     nullable: true
-  - name: Torre_Longitude
+  - name: torre_longitude
     type: double
     nullable: true
-  - name: ID_Antena_Conectada
+  - name: id_antena_conectada
     type: bigint
     nullable: false
     description: "Identificador da célula (cell) da torre OpenCelliD."
-  - name: Estado_Antena
+  - name: estado_antena
     type: boolean
     nullable: true
-    description: "status da torre no snapshot do dia (ACTIVE/DOWN na bronze)."
-  - name: Distancia_Antena_m
+    description: "status da torre no snapshot do dia."
+  - name: distancia_antena_m
     type: double
     nullable: true
     description: "Distância média Haversine log→torre no dia."
-  - name: Tecnologia_Rede
+  - name: tecnologia_rede
     type: varchar
     nullable: true
     description: "LTE/GSM/UMTS/NR/CDMA/OTHER a partir de radio_ohe_* da torre."
-  - name: Potencia_RSRP
+  - name: potencia_rsrp
     type: double
     nullable: true
     description: "Média RSRP (dBm), apenas valores entre -140 e -44."
-  - name: Qualidade_RSRQ
+  - name: qualidade_rsrq
     type: double
     nullable: true
-  - name: Ruido_SINR
+  - name: ruido_sinr
     type: double
     nullable: true
-  - name: Velocidade_Downlink
+  - name: velocidade_downlink
     type: double
     nullable: true
-  - name: Telefones_Sucesso
+  - name: telefones_sucesso
     type: bigint
     nullable: true
-  - name: Telefones_Falha
+  - name: telefones_falha
     type: bigint
     nullable: true
-  - name: Telefones_Sem_Teste
+  - name: telefones_sem_teste
     type: bigint
     nullable: true
 
 semantics:
   definitions:
-    drop_rate_proxy: "(Telefones_Falha / (Telefones_Sucesso + Telefones_Falha)) * 100 quando há testes."
-    Estado_Antena: "FALSE indica torre DOWN no snapshot (simulação tempestade Leste)."
+    drop_rate_proxy: "(telefones_falha / (telefones_sucesso + telefones_falha)) * 100 quando há testes."
+    estado_antena: "FALSE indica torre DOWN no snapshot (simulação tempestade Leste)."
 
 quality:
   constraints:
-    - rule: "uniqueness(ID_Antena_Conectada, Data_Hora) == 100%"
+    - rule: "uniqueness(id_antena_conectada, data_hora) == 100%"
       severity: error
-    - rule: "Potencia_RSRP IS NULL OR (Potencia_RSRP BETWEEN -140 AND -44)"
+    - rule: "potencia_rsrp IS NULL OR (potencia_rsrp BETWEEN -140 AND -44)"
       severity: warning
-    - rule: "Torre_Latitude IS NOT NULL AND Torre_Longitude IS NOT NULL para consumo em mapas"
+    - rule: "torre_latitude IS NOT NULL AND torre_longitude IS NOT NULL para consumo em mapas"
       severity: error
   slo:
     freshness: "Snapshot disponível após conclusão bem-sucedida do pipeline batch (sem SLA temporal recorrente)"
@@ -115,7 +114,3 @@ change_management:
     - change: "rename_column"
       version_bump: major
       compatibility: breaking
-    - change: "production_model_only"
-      version_bump: minor
-      compatibility: backward
-      notes: "Alterações de schedule/trigger/SLO sem mudança de schema (ex.: v1.0.0 → v1.1.0)."

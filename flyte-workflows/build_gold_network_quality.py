@@ -3,10 +3,7 @@ from flytekit import ImageSpec, task
 
 from flyte_task_env import TASK_ENV
 from workflow_functions.loki_logging import get_logger
-from workflow_functions.trino_acid import (
-    replace_table_transaction,
-    replace_table_transaction_multi_insert,
-)
+from workflow_functions.iceberg_replace import replace_iceberg_table
 
 logger = get_logger(__name__)
 
@@ -63,12 +60,11 @@ _COUNT_SILVER_LOGS = """
 _CHECK_GOLD_ANTENNA_COLUMNS = """
     SELECT
         COUNT(*) AS n,
-        COUNT_IF("ID_Antena_Conectada" IS NULL) AS id_nulls,
-        COUNT_IF("Estado_Antena" IS NULL) AS estado_nulls,
-        COUNT_IF("Distancia_Antena_m" IS NULL) AS dist_nulls
+        COUNT_IF(id_antena_conectada IS NULL) AS id_nulls,
+        COUNT_IF(estado_antena IS NULL) AS estado_nulls,
+        COUNT_IF(distancia_antena_m IS NULL) AS dist_nulls
     FROM iceberg.gold.network_quality_daily
 """
-
 
 def _assert_antenna_columns_sane(cur, *, context: str) -> None:
     cur.execute(_CHECK_GOLD_ANTENNA_COLUMNS)
@@ -81,11 +77,11 @@ def _assert_antenna_columns_sane(cur, *, context: str) -> None:
         return
     problems: list[str] = []
     if id_n == n:
-        problems.append("ID_Antena_Conectada is NULL for every row")
+        problems.append("id_antena_conectada is NULL for every row")
     if est_n == n:
-        problems.append("Estado_Antena is NULL for every row")
+        problems.append("estado_antena is NULL for every row")
     if dist_n == n:
-        problems.append("Distancia_Antena_m is NULL for every row")
+        problems.append("distancia_antena_m is NULL for every row")
     if problems:
         raise RuntimeError(f"{context}: {'; '.join(problems)}")
 
@@ -123,18 +119,19 @@ def build_gold_network_quality() -> str:
         cur.execute(_COUNT_SILVER_LOGS)
         n_logs = int(cur.fetchone()[0])
         if n_logs == 0:
-            logger.warning("Silver network_logs is empty; clearing gold atomically")
-            replace_table_transaction_multi_insert(
+            logger.warning("Silver network_logs is empty; clearing gold (CREATE OR REPLACE)")
+            replace_iceberg_table(
                 conn,
                 table_fqn="iceberg.gold.network_quality_daily",
-                insert_sqls=[],
+                select_sql=(
+                    "SELECT * FROM iceberg.gold.network_quality_daily WHERE FALSE"
+                ),
                 logger=logger,
             )
             return "Gold network_quality_daily empty (no silver logs)"
 
-        logger.info("Replacing gold.network_quality_daily (ACID full batch)")
-        insert_query = f"""
-            INSERT INTO iceberg.gold.network_quality_daily
+        logger.info("Replacing gold.network_quality_daily (CREATE OR REPLACE)")
+        load_sql = f"""
             WITH tests_by_day AS (
                 SELECT
                     phone_number,
@@ -199,21 +196,20 @@ def build_gold_network_quality() -> str:
             )
             SELECT
                 ROW_NUMBER() OVER (ORDER BY dt.log_day, dt.silver_row_id) AS gold_row_id,
-                CAST(dt.log_day AS TIMESTAMP(3)) AS "Data_Hora",
+                CAST(dt.log_day AS TIMESTAMP(3)) AS data_hora,
                 CASE
                     WHEN dt.lat > 39.75 AND dt.lon > -8.80 THEN 'Norte-Leste'
                     WHEN dt.lat > 39.75 THEN 'Norte-Oeste'
                     WHEN dt.lon > -8.80 THEN 'Sul-Leste'
                     ELSE 'Sul-Oeste'
-                END AS "Zona_Leiria",
-                dt.lat AS "Latitude_Ocorrencia",
-                dt.lon AS "Longitude_Ocorrencia",
-                dt.lat AS "Torre_Latitude",
-                dt.lon AS "Torre_Longitude",
-                CAST(dt.cell AS BIGINT) AS "ID_Antena_Conectada",
-                -- O status agora vem diretamente do snapshot do dia, permitindo ver a torre cair!
-                dt.status AS "Estado_Antena",
-                ROUND(AVG(e.dist_m), 2) AS "Distancia_Antena_m",
+                END AS zona_leiria,
+                dt.lat AS latitude_ocorrencia,
+                dt.lon AS longitude_ocorrencia,
+                dt.lat AS torre_latitude,
+                dt.lon AS torre_longitude,
+                CAST(dt.cell AS BIGINT) AS id_antena_conectada,
+                dt.status AS estado_antena,
+                ROUND(AVG(e.dist_m), 2) AS distancia_antena_m,
                 CASE
                     WHEN dt.radio_ohe_lte THEN 'LTE'
                     WHEN dt.radio_ohe_gsm THEN 'GSM'
@@ -221,14 +217,14 @@ def build_gold_network_quality() -> str:
                     WHEN dt.radio_ohe_nr THEN 'NR'
                     WHEN dt.radio_ohe_cdma THEN 'CDMA'
                     ELSE 'OTHER'
-                END AS "Tecnologia_Rede",
-                ROUND(AVG(CASE WHEN e.rsrp BETWEEN -140 AND -44 THEN e.rsrp END), 2) AS "Potencia_RSRP",
-                ROUND(AVG(CASE WHEN e.rsrq BETWEEN -50 AND 30 THEN e.rsrq END), 2) AS "Qualidade_RSRQ",
-                ROUND(AVG(CASE WHEN e.sinr BETWEEN -30 AND 80 THEN e.sinr END), 2) AS "Ruido_SINR",
-                ROUND(AVG(CASE WHEN e.downlink_mbps BETWEEN 0 AND 5000 THEN e.downlink_mbps END), 2) AS "Velocidade_Downlink",
-                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = TRUE THEN e.phone_number END) AS BIGINT) AS "Telefones_Sucesso",
-                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = FALSE THEN e.phone_number END) AS BIGINT) AS "Telefones_Falha",
-                CAST(COUNT(DISTINCT CASE WHEN tb.last_result IS NULL THEN e.phone_number END) AS BIGINT) AS "Telefones_Sem_Teste"
+                END AS tecnologia_rede,
+                ROUND(AVG(CASE WHEN e.rsrp BETWEEN -140 AND -44 THEN e.rsrp END), 2) AS potencia_rsrp,
+                ROUND(AVG(CASE WHEN e.rsrq BETWEEN -50 AND 30 THEN e.rsrq END), 2) AS qualidade_rsrq,
+                ROUND(AVG(CASE WHEN e.sinr BETWEEN -30 AND 80 THEN e.sinr END), 2) AS ruido_sinr,
+                ROUND(AVG(CASE WHEN e.downlink_mbps BETWEEN 0 AND 5000 THEN e.downlink_mbps END), 2) AS velocidade_downlink,
+                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = TRUE THEN e.phone_number END) AS BIGINT) AS telefones_sucesso,
+                CAST(COUNT(DISTINCT CASE WHEN tb.last_result = FALSE THEN e.phone_number END) AS BIGINT) AS telefones_falha,
+                CAST(COUNT(DISTINCT CASE WHEN tb.last_result IS NULL THEN e.phone_number END) AS BIGINT) AS telefones_sem_teste
             FROM daily_towers dt
             -- O LEFT JOIN garante que as antenas vazias continuam no mapa com ZERO problemas
             LEFT JOIN enriched e 
@@ -251,10 +247,10 @@ def build_gold_network_quality() -> str:
                 dt.radio_ohe_cdma,
                 dt.radio_ohe_other
         """
-        replace_table_transaction(
+        replace_iceberg_table(
             conn,
             table_fqn="iceberg.gold.network_quality_daily",
-            insert_sql=insert_query,
+            select_sql=load_sql,
             logger=logger,
         )
 

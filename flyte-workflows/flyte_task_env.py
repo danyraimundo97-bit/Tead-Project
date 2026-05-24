@@ -3,7 +3,7 @@
 Override at ``pyflyte register`` time via host env if needed:
 ``FLYTE_TASK_LOG_LEVEL``, ``FLYTE_TASK_LOKI_URL``,
 ``FLYTE_TASK_MINIO_ACCESS_KEY``, ``FLYTE_TASK_MINIO_SECRET_KEY``,
-``FLYTE_TASK_MINIO_ENDPOINT``.
+``FLYTE_TASK_MINIO_ENDPOINT``, ``FLYTE_TASK_TRINO_HOST``.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 _MINIO_ENDPOINT_DEFAULT = "http://host.docker.internal:9000"
+_TRINO_HOST_DEFAULT = "host.docker.internal"
 
 TASK_ENV: dict[str, str] = {
     "LOG_LEVEL": os.environ.get("FLYTE_TASK_LOG_LEVEL", "DEBUG"),
@@ -27,6 +28,7 @@ TASK_ENV: dict[str, str] = {
     "MLFLOW_S3_ENDPOINT_URL": os.environ.get(
         "FLYTE_TASK_MINIO_ENDPOINT", _MINIO_ENDPOINT_DEFAULT
     ),
+    "TRINO_HOST": os.environ.get("FLYTE_TASK_TRINO_HOST", _TRINO_HOST_DEFAULT),
 }
 
 

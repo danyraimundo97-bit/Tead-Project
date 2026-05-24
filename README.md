@@ -115,6 +115,16 @@ pyflyte run --remote flyte-workflows/workflow.py jdpt_lakehouse_pipeline
 | 3 | **`jdpt_streaming_full_sync`** | `flyte-workflows/streaming_full_sync.py` |
 | 4 | (opcional) `jdpt_streaming_quality_check` | `flyte-workflows/avaliar_streaming.py` |
 
+**Limpar tabelas streaming** (só `network_events_*` e checkpoints; batch intacto):
+
+```bash
+# SQL rápido no Trino (apaga linhas, mantém tabelas)
+# sql_scripts/clean_streaming_tables.sql
+
+# Reset completo (DROP + MinIO + recria DDL)
+pyflyte run --remote flyte-workflows/clean_streaming_tables.py reset_streaming_workflow
+```
+
 ```bash
 pip install -r python_scripts/requirements.txt
 python python_scripts/producer_network_events.py
@@ -244,6 +254,8 @@ Opções do producer: `--no-nulls`, `--no-loki`, `--broker localhost:19092`.
 | Ficheiro | Uso |
 |----------|-----|
 | `sql_scripts/setup_streaming_tables.sql` | Tabelas bronze/silver/gold streaming |
+| `sql_scripts/clean_streaming_tables.sql` | Apagar dados streaming (Trino) |
+| `flyte-workflows/clean_streaming_tables.py` | Reset streaming (DROP + MinIO + DDL) |
 | `trino/etc/catalog/iceberg.properties` | Catálogo Iceberg |
 | `trino/etc/catalog/kafka.properties` | Catálogo Kafka → Redpanda |
 | `trino/etc/kafka/network_events.json` | Schema tópico `network_events` |

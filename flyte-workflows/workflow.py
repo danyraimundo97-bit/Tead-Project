@@ -20,7 +20,7 @@ def jdpt_lakehouse_pipeline() -> str:
     # Ambiente + inputs bronze + DDL silver
     silver_env = ensure_silver_layer_environment()
 
-    # Bronze → silver (paralelo; logs, call_tests, cdr_customers, towers)
+    # Bronze → silver (em série: reduz picos de escrita no MinIO)
     silver_cdr = process_cdr_to_silver()
     silver_logs = process_logs_to_silver()
     silver_tests = process_call_tests_to_silver()
@@ -39,15 +39,16 @@ def jdpt_lakehouse_pipeline() -> str:
     # Auditoria Final da Camada Gold
     gold_checks = avaliar_gold()
 
-    # Dependências de Execução
-    silver_env >> silver_cdr
-    silver_env >> silver_logs
-    silver_env >> silver_tests
-    silver_env >> silver_towers
+    # Dependências de Execução (em série: reduz picos de escrita no MinIO)
+    #silver_env >> silver_cdr
+    #silver_env >> silver_logs
+    #silver_env >> silver_tests
+    #silver_env >> silver_towers
 
-    silver_cdr >> silver_checks
-    silver_logs >> silver_checks
-    silver_tests >> silver_checks
+    #silver_cdr >> silver_checks
+    #silver_logs >> silver_checks
+    #silver_tests >> silver_checks
+    silver_env >> silver_cdr >> silver_logs >> silver_tests >> silver_towers
     silver_towers >> silver_checks
 
     silver_checks >> gold_env

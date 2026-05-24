@@ -3,7 +3,7 @@ from flytekit import ImageSpec, task
 
 from flyte_task_env import TASK_ENV
 from workflow_functions.loki_logging import get_logger
-from workflow_functions.trino_acid import replace_table_transaction_multi_insert
+from workflow_functions.iceberg_replace import replace_iceberg_table
 
 logger = get_logger(__name__)
 
@@ -20,9 +20,9 @@ _COUNT_CDR = """
 _CHECK_GOLD_CHURN_COLUMNS = """
     SELECT
         COUNT(*) AS n,
-        COUNT_IF("Telefone" IS NULL) AS telefone_nulls,
-        COUNT_IF("Data_Referencia" IS NULL) AS data_ref_nulls,
-        COUNT_IF("Desistencia" IS NULL) AS desistencia_nulls
+        COUNT_IF(telefone IS NULL) AS telefone_nulls,
+        COUNT_IF(data_referencia IS NULL) AS data_ref_nulls,
+        COUNT_IF(desistencia IS NULL) AS desistencia_nulls
     FROM iceberg.gold.churn_risk_daily
 """
 
@@ -39,11 +39,11 @@ def _assert_churn_columns_sane(cur, *, context: str) -> None:
         return
     problems: list[str] = []
     if tel_n == n:
-        problems.append("Telefone is NULL for every row")
+        problems.append("telefone is NULL for every row")
     if ref_n == n:
-        problems.append("Data_Referencia is NULL for every row")
+        problems.append("data_referencia is NULL for every row")
     if des_n == n:
-        problems.append("Desistencia is NULL for every row")
+        problems.append("desistencia is NULL for every row")
     if problems:
         raise RuntimeError(f"{context}: {'; '.join(problems)}")
 
@@ -59,24 +59,20 @@ def _snapshot_dates_sql() -> str:
     """
 
 
-def _insert_one_snapshot_date(*, snapshot_date_sql: str) -> str:
-    """One day: CDR × pre-aggregated facts; assigns monotonic gold_row_id."""
+def _select_one_snapshot_date(*, snapshot_date_sql: str) -> str:
+    """One day: CDR × pre-aggregated facts (sem gold_row_id; atribuído no REPLACE final)."""
     return f"""
-        INSERT INTO iceberg.gold.churn_risk_daily
         SELECT
-            (SELECT COALESCE(MAX(gold_row_id), CAST(0 AS BIGINT))
-                FROM iceberg.gold.churn_risk_daily)
-                + ROW_NUMBER() OVER (ORDER BY cdr.phone_number) AS gold_row_id,
-            DATE '{snapshot_date_sql}' AS "Data_Referencia",
-            cdr.phone_number AS "Telefone",
-            COALESCE(al.storm_affected, FALSE) AS "Afetado_Tempestade",
+            DATE '{snapshot_date_sql}' AS data_referencia,
+            cdr.phone_number AS telefone,
+            COALESCE(al.storm_affected, FALSE) AS afetado_tempestade,
             (cdr.day_charge + cdr.eve_charge + cdr.night_charge + cdr.intl_charge)
-                AS "Receita_Em_Risco",
-            cdr.account_length AS "Tempo_Subscrito",
-            cdr.custserv_calls AS "Total_Chamadas_Suporte",
-            COALESCE(ac.total_drops, CAST(0 AS BIGINT)) AS "Total_Drops",
-            ac.qualidade_audio_mos AS "Qualidade_Audio_MOS",
-            cdr.churn AS "Desistencia"
+                AS receita_em_risco,
+            cdr.account_length AS tempo_subscrito,
+            cdr.custserv_calls AS total_chamadas_suporte,
+            COALESCE(ac.total_drops, CAST(0 AS BIGINT)) AS total_drops,
+            ac.qualidade_audio_mos AS qualidade_audio_mos,
+            cdr.churn AS desistencia
         FROM iceberg.silver.cdr_customers cdr
         LEFT JOIN (
             SELECT
@@ -101,10 +97,10 @@ def _insert_one_snapshot_date(*, snapshot_date_sql: str) -> str:
 @task(container_image=gold_image, environment=TASK_ENV)
 def build_gold_churn_risk() -> str:
     """
-    Gold Produto B: uma linha por cliente por dia (Data_Referencia), com gold_row_id.
+    Gold Produto B: uma linha por cliente por dia (data_referencia), com gold_row_id.
     Inserções por dia para limitar memória no Trino; validação pré/pós como network quality.
     """
-    logger.info("Gold churn_risk_daily: full batch from silver (chunked by Data_Referencia)")
+    logger.info("Gold churn_risk_daily: full batch from silver (chunked by data_referencia)")
 
     conn = trino.dbapi.connect(
         host="host.docker.internal",
@@ -123,7 +119,7 @@ def build_gold_churn_risk() -> str:
             )
         logger.info("Silver CDR rows: %s", n_cdr)
 
-        logger.info("Replacing gold.churn_risk_daily (ACID full batch)")
+        logger.info("Replacing gold.churn_risk_daily (CREATE OR REPLACE)")
 
         cur.execute(_snapshot_dates_sql())
         raw_dates = [row[0] for row in cur.fetchall()]
@@ -134,7 +130,7 @@ def build_gold_churn_risk() -> str:
             return str(d)[:10]
 
         dates = [_fmt(d) for d in raw_dates]
-        logger.info("Churn gold: %s distinct Data_Referencia value(s) to load", len(dates))
+        logger.info("Churn gold: %s distinct data_referencia value(s) to load", len(dates))
 
         if len(dates) == 0:
             logger.warning(
@@ -143,13 +139,29 @@ def build_gold_churn_risk() -> str:
             _assert_churn_columns_sane(cur, context="After churn rebuild (no dates)")
             return "Gold churn_risk_daily empty (no activity dates in silver)"
 
-        insert_sqls = [
-            _insert_one_snapshot_date(snapshot_date_sql=d) for d in dates
-        ]
-        replace_table_transaction_multi_insert(
+        day_selects = "\nUNION ALL\n".join(
+            f"({_select_one_snapshot_date(snapshot_date_sql=d).strip()})"
+            for d in dates
+        )
+        replace_iceberg_table(
             conn,
             table_fqn="iceberg.gold.churn_risk_daily",
-            insert_sqls=insert_sqls,
+            select_sql=f"""
+            SELECT
+                ROW_NUMBER() OVER (ORDER BY data_referencia, telefone) AS gold_row_id,
+                data_referencia,
+                telefone,
+                afetado_tempestade,
+                receita_em_risco,
+                tempo_subscrito,
+                total_chamadas_suporte,
+                total_drops,
+                qualidade_audio_mos,
+                desistencia
+            FROM (
+                {day_selects}
+            ) AS combined
+            """,
             logger=logger,
         )
 

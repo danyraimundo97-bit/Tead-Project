@@ -8,7 +8,7 @@ from flyte_task_env import TASK_ENV, minio_s3_client
 from workflow_functions.loki_logging import get_logger
 from workflow_functions.silver_quarantine import NUMERIC_DESTROY_THRESHOLD, insert_quarantine_rows
 from workflow_functions.silver_transforms import transform_call_tests_silver_features
-from workflow_functions.trino_acid import replace_table_transaction
+from workflow_functions.iceberg_replace import replace_iceberg_table
 
 logger = get_logger(__name__)
 
@@ -235,19 +235,13 @@ def process_call_tests_to_silver() -> str:
         )
         cur.fetchall()
 
-        logger.info("Replacing iceberg.silver.call_tests with full batch (ACID)")
-        replace_table_transaction(
+        logger.info("Replacing iceberg.silver.call_tests with full batch (CREATE OR REPLACE)")
+        replace_iceberg_table(
             conn,
             table_fqn="iceberg.silver.call_tests",
-            insert_sql="""
-            INSERT INTO iceberg.silver.call_tests (
-                silver_row_id, date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
-                duration_s, setup_time_s, result, mos, phone_number,
-                tech_ohe_gsm, tech_ohe_umts, tech_ohe_lte, tech_ohe_volte,
-                tech_ohe_nr, tech_ohe_other
-            )
+            select_sql="""
             SELECT
-                ROW_NUMBER() OVER (ORDER BY date_of_test, phone_number),
+                ROW_NUMBER() OVER (ORDER BY date_of_test, phone_number) AS silver_row_id,
                 date_of_test, signal_dbm, speed_m_s, distance_from_site_m,
                 duration_s, setup_time_s, result, mos, phone_number,
                 tech_ohe_gsm, tech_ohe_umts, tech_ohe_lte, tech_ohe_volte,

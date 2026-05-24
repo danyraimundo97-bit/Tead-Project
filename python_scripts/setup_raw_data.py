@@ -24,10 +24,10 @@ def setup_raw_data():
     BUCKET_NAME = 'warehouse'
     DEST_FOLDER = 'Dados_Raw'
 
-    # Descobre a pasta onde o script está localizado
+    # Repo root: script lives in python_scripts/, datasets/ is one level up
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Junta com a pasta dos datasets
-    BASE_DIR = os.path.join(script_dir, "datasets", "Datasets_Raw")
+    repo_root = os.path.dirname(script_dir)
+    BASE_DIR = os.path.join(repo_root, "datasets", "Datasets_Raw")
 
     # Os 4 ficheiros vitais do projeto
     FILES_TO_UPLOAD = [
