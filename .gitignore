@@ -1,6 +1,5 @@
 __pycache__/
 *.pyc
 .DS_Store
-*.zip
 churn_risk_daily_*.json
 network_quality_daily_*.json
