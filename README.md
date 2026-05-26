@@ -164,7 +164,7 @@ Pasta `docs/Relatório/figuras/` (também usadas em `docs/Relatório/main.tex`).
 
 ### Tabelas streaming
 
-![Tabelas streaming (lakehouse)](docs/Relatório/figuras/Streaming%20tables.png)
+![Tabelas streaming (lakehouse)](docs/Relatório/figuras/Streaming_tables.png)
 
 Para alterar os diagramas, ver `docs/diagrams/lakehouse-tables-streaming.mmd`, `lakehouse-tables-batch.mmd` e `docs/diagrams/*.bpmn`.
 
