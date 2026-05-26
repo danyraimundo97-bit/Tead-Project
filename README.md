@@ -213,7 +213,31 @@ Registar datasets sobre `iceberg.gold.network_quality_daily`, `iceberg.gold.chur
 
 ---
 
-## 7. Documentação e contratos (ficheiros no repo)
+## 7. Dashboards
+
+Screenshots disponíveis em `docs/Dashboards/`.
+
+### Grafana
+
+![Dashboard Grafana](docs/Dashboards/Dashboard%20Grafana.png)
+
+Config de importação: [`dashboard-grafana.json`](docs/Dashboards/dashboard-grafana.json)
+
+### Superset
+
+![Dashboard Superset](docs/Dashboards/Dashboard%20Superset.png)
+
+Pacote de exportação: [`dashboard_superset.zip`](docs/Dashboards/dashboard_superset.zip)
+
+### Superset — Network Quality
+
+![Dashboard Superset - Network Quality](docs/Dashboards/Dashboard%20Superset%20-%20Network%20Quality.png)
+
+Pacote de exportação: [`dashboard_superset.zip`](docs/Dashboards/dashboard_superset.zip)
+
+---
+
+## 8. Documentação e contratos (ficheiros no repo)
 
 | Artefacto | Caminho |
 |-----------|---------|
@@ -225,7 +249,7 @@ Registar datasets sobre `iceberg.gold.network_quality_daily`, `iceberg.gold.chur
 
 ---
 
-## 8. Datasets
+## 9. Datasets
 
 | Pasta | Conteúdo |
 |-------|----------|
@@ -237,7 +261,7 @@ Bronze no MinIO para o batch: prefixos `warehouse/bronze/cdr_customers/`, `netwo
 
 ---
 
-## 9. Scripts Python
+## 10. Scripts Python
 
 | Script | Função |
 |--------|--------|
@@ -249,7 +273,7 @@ Opções do producer: `--no-nulls`, `--no-loki`, `--broker localhost:19092`.
 
 ---
 
-## 10. SQL e catálogos Trino
+## 11. SQL e catálogos Trino
 
 | Ficheiro | Uso |
 |----------|-----|
